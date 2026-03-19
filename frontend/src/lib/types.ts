@@ -29,3 +29,27 @@ export interface ImageStats {
   status: string;
   count: number;
 }
+
+export interface Task {
+  id: number;
+  status: string;
+  steps: string[];
+  total_images: number;
+  completed_images: number;
+  failed_images: number;
+  error_message: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ProgressMessage {
+  type: string;
+  task_id: number;
+  image_id?: number;
+  step?: string;
+  progress?: number;
+  message?: string;
+  status?: string;
+  error?: string;
+}

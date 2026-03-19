@@ -1,4 +1,4 @@
-import type { ImageListResponse, ImageStats, Image } from './types';
+import type { ImageListResponse, ImageStats, Image, Task } from './types';
 
 const BASE = '/api';
 
@@ -46,4 +46,24 @@ export function thumbnailUrl(id: number): string {
 
 export function imageFileUrl(id: number, variant: string = 'source'): string {
   return `${BASE}/images/${id}/file?variant=${variant}`;
+}
+
+export async function createBatchTask(imageIds: number[] | 'all', steps: string[]): Promise<Task> {
+  return fetchJSON<Task>(`${BASE}/processing/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_ids: imageIds, steps }),
+  });
+}
+
+export async function cancelTask(taskId: number): Promise<void> {
+  await fetch(`${BASE}/processing/${taskId}`, { method: 'DELETE' });
+}
+
+export async function getTasks(): Promise<Task[]> {
+  return fetchJSON<Task[]>(`${BASE}/tasks`);
+}
+
+export async function getTask(taskId: number): Promise<Task> {
+  return fetchJSON<Task>(`${BASE}/tasks/${taskId}`);
 }

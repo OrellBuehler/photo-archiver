@@ -4,6 +4,7 @@
   import type { Image, ImageStats } from '$lib/types';
   import ImageGrid from '$lib/components/ImageGrid.svelte';
   import FilterBar from '$lib/components/FilterBar.svelte';
+  import ProcessingPanel from '$lib/components/ProcessingPanel.svelte';
 
   let images = $state<Image[]>([]);
   let stats = $state<ImageStats[]>([]);
@@ -105,3 +106,11 @@
     </div>
   {/if}
 {/if}
+
+<ProcessingPanel
+  {selectedIds}
+  onTaskCreated={(id) => {
+    selectedIds = new Set();
+    window.location.href = '/processing';
+  }}
+/>
