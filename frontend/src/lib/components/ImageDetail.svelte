@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Image } from '$lib/types';
   import { imageFileUrl, updateImage } from '$lib/api';
+  import BeforeAfter from '$lib/components/BeforeAfter.svelte';
 
   let { image: initialImage }: { image: Image } = $props();
 
@@ -13,6 +14,7 @@
   let editTitle = $state(image.title ?? '');
 
   let activeVariant = $state<string>('source');
+  let showCompare = $state(false);
 
   let variants = $derived(() => {
     const v: { key: string; label: string }[] = [{ key: 'source', label: 'Source' }];
@@ -57,19 +59,34 @@
       <div class="flex gap-1 mb-3">
         {#each variants() as v}
           <button
-            class="rounded-md px-3 py-1.5 text-sm transition-colors {activeVariant === v.key ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'}"
-            onclick={() => activeVariant = v.key}
+            class="rounded-md px-3 py-1.5 text-sm transition-colors {activeVariant === v.key && !showCompare ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'}"
+            onclick={() => { activeVariant = v.key; showCompare = false; }}
           >{v.label}</button>
         {/each}
+        {#if image.enhanced_path}
+          <button
+            class="rounded-md px-3 py-1.5 text-sm transition-colors {showCompare ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'}"
+            onclick={() => showCompare = !showCompare}
+          >Compare</button>
+        {/if}
       </div>
     {/if}
-    <div class="rounded-lg border overflow-hidden bg-muted">
-      <img
-        src={imageFileUrl(image.id, activeVariant)}
-        alt={image.title || image.filename}
-        class="w-full h-auto"
+    {#if showCompare && image.enhanced_path}
+      <BeforeAfter
+        beforeSrc={imageFileUrl(image.id, 'source')}
+        afterSrc={imageFileUrl(image.id, 'enhanced')}
+        beforeLabel="Source"
+        afterLabel="Enhanced"
       />
-    </div>
+    {:else}
+      <div class="rounded-lg border overflow-hidden bg-muted">
+        <img
+          src={imageFileUrl(image.id, activeVariant)}
+          alt={image.title || image.filename}
+          class="w-full h-auto"
+        />
+      </div>
+    {/if}
   </div>
 
   <!-- Metadata panel -->

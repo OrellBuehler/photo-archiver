@@ -113,7 +113,28 @@ async def run_task(task_id: int):
                                 await asyncio.to_thread(orient_image, full_path)
 
                         elif step == "enhance":
-                            pass
+                            from app.services.enhancer import enhance_image
+                            source_for_enhance = None
+                            if organized_path:
+                                source_for_enhance = os.path.join(settings.output_dir, organized_path)
+                            else:
+                                source_for_enhance = os.path.join(settings.source_dir, item["source_path"])
+
+                            if organized_path:
+                                enhanced_rel = organized_path.replace("organized/", "enhanced/", 1)
+                            else:
+                                scan_id = item["scan_id"] or os.path.splitext(item["source_path"])[0]
+                                enhanced_rel = f"enhanced/unsorted/{scan_id}.jpg"
+
+                            await asyncio.to_thread(
+                                enhance_image, source_for_enhance, enhanced_rel
+                            )
+                            async with get_db() as db:
+                                await db.execute(
+                                    "UPDATE images SET enhanced_path = ?, status = 'enhanced', updated_at = datetime('now') WHERE id = ?",
+                                    (enhanced_rel, image_id)
+                                )
+                                await db.commit()
 
                         await _broadcast({
                             "type": "step_completed",
