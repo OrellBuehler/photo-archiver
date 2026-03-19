@@ -1,0 +1,14 @@
+[project]
+name = "photo-archiver-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "aiosqlite",
+    "pillow",
+    "pydantic-settings",
+    "python-multipart",
+]
