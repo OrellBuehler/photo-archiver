@@ -1,0 +1,29 @@
+services:
+  photo-archiver:
+    build: .
+    ports:
+      - "8080:8000"
+    volumes:
+      - ./archive-images:/data/source:ro
+      - ./output:/data/output
+    environment:
+      - SOURCE_DIR=/data/source
+      - OUTPUT_DIR=/data/output
+    restart: unless-stopped
+
+  photo-archiver-gpu:
+    extends:
+      service: photo-archiver
+    profiles:
+      - gpu
+    environment:
+      - SOURCE_DIR=/data/source
+      - OUTPUT_DIR=/data/output
+      - DEVICE=cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
