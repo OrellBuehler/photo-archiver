@@ -4,6 +4,8 @@ from app.db import init_db
 from app.config import settings
 from app.scanner import scan_source
 from app.routers import images
+from app.routers import processing
+from app.routers import ws
 import os
 
 
@@ -18,6 +20,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(images.router)
+app.include_router(processing.router)
+app.include_router(ws.router)
 
 
 @app.get("/api/health")
