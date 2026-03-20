@@ -48,8 +48,18 @@ async def init_db():
                 started_at TEXT,
                 completed_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
         """)
         await db.commit()
+        try:
+            await db.execute("ALTER TABLE images ADD COLUMN phash TEXT")
+            await db.commit()
+        except Exception:
+            pass
 
 
 @asynccontextmanager

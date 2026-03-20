@@ -11,6 +11,8 @@
       <nav class="flex gap-4">
         <a href="/" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Gallery</a>
         <a href="/processing" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Processing</a>
+        <a href="/duplicates" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Duplicates</a>
+        <a href="/settings" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Settings</a>
       </nav>
     </div>
   </header>
