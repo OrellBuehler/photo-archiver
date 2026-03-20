@@ -50,24 +50,28 @@ async def scan_source():
             file_size = os.path.getsize(full_path)
 
             width, height = None, None
+            phash = None
             try:
+                import imagehash
                 from PIL import Image
                 with Image.open(full_path) as img:
                     width, height = img.size
+                    phash = str(imagehash.phash(img))
             except Exception:
                 pass
 
-            images.append((rel_path, f, scan_id, file_size, width, height, year, month, title))
+            images.append((rel_path, f, scan_id, file_size, width, height, year, month, title, phash))
 
     async with get_db() as db:
         for img in images:
             await db.execute("""
-                INSERT INTO images (source_path, filename, scan_id, file_size, width, height, year, month, title)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO images (source_path, filename, scan_id, file_size, width, height, year, month, title, phash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_path) DO UPDATE SET
                     file_size=excluded.file_size,
                     width=excluded.width,
                     height=excluded.height,
+                    phash=excluded.phash,
                     updated_at=datetime('now')
             """, img)
         await db.commit()
