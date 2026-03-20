@@ -43,6 +43,18 @@ export interface Task {
   completed_at: string | null;
 }
 
+export interface AppSettings {
+  source_dir: string;
+  output_dir: string;
+  thumbnail_size: number;
+  device: string;
+}
+
+export interface DuplicateGroup {
+  images: Image[];
+  distance: number;
+}
+
 export interface ProgressMessage {
   type: string;
   task_id: number;

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from app.db import get_db
 from app.config import settings
-from app.models import ImageOut, ImageUpdate, ImageListResponse, ImageStats
+from app.models import ImageOut, ImageUpdate, ImageListResponse, ImageStats, BulkDeleteRequest, BulkUpdateRequest
 from app.utils.thumbnails import generate_thumbnail, get_thumbnail_path
 
 router = APIRouter(prefix="/api/images", tags=["images"])
@@ -147,3 +147,75 @@ async def update_image(image_id: int, update: ImageUpdate):
         cursor = await db.execute("SELECT * FROM images WHERE id = ?", (image_id,))
         row = await cursor.fetchone()
         return ImageOut(**dict(row))
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_images(request: BulkDeleteRequest):
+    async with get_db() as db:
+        placeholders = ",".join("?" * len(request.image_ids))
+        cursor = await db.execute(
+            f"SELECT id, organized_path, enhanced_path FROM images WHERE id IN ({placeholders})",
+            request.image_ids
+        )
+        rows = await cursor.fetchall()
+
+        def delete_files():
+            for row in rows:
+                row = dict(row)
+                if row["organized_path"]:
+                    path = os.path.join(settings.output_dir, row["organized_path"])
+                    if os.path.exists(path):
+                        os.remove(path)
+                if row["enhanced_path"]:
+                    path = os.path.join(settings.output_dir, row["enhanced_path"])
+                    if os.path.exists(path):
+                        os.remove(path)
+                thumb_path = os.path.join(settings.output_dir, ".thumbnails", f"{row['id']}.jpg")
+                if os.path.exists(thumb_path):
+                    os.remove(thumb_path)
+
+        await asyncio.to_thread(delete_files)
+
+        await db.execute(
+            f"DELETE FROM task_items WHERE image_id IN ({placeholders})",
+            request.image_ids
+        )
+        cursor = await db.execute(
+            f"DELETE FROM images WHERE id IN ({placeholders})",
+            request.image_ids
+        )
+        await db.commit()
+
+        return {"deleted": cursor.rowcount}
+
+
+@router.patch("/bulk")
+async def bulk_update_images(request: BulkUpdateRequest):
+    async with get_db() as db:
+        updates = []
+        params = []
+
+        if request.year is not None:
+            updates.append("year = ?")
+            params.append(request.year)
+        if request.month is not None:
+            updates.append("month = ?")
+            params.append(request.month)
+        if request.title is not None:
+            updates.append("title = ?")
+            params.append(request.title)
+
+        if not updates:
+            return {"updated": 0}
+
+        updates.append("updated_at = datetime('now')")
+        placeholders = ",".join("?" * len(request.image_ids))
+        params.extend(request.image_ids)
+
+        cursor = await db.execute(
+            f"UPDATE images SET {', '.join(updates)} WHERE id IN ({placeholders})",
+            params
+        )
+        await db.commit()
+
+        return {"updated": cursor.rowcount}

@@ -16,6 +16,7 @@ class ImageOut(BaseModel):
     organized_path: str | None
     enhanced_path: str | None
     thumbnail_path: str | None
+    phash: str | None = None
     created_at: str | None
     updated_at: str | None
 
@@ -75,3 +76,31 @@ class ProgressMessage(BaseModel):
     step: str | None = None
     progress: float | None = None
     message: str | None = None
+
+
+class BulkDeleteRequest(BaseModel):
+    image_ids: list[int]
+
+
+class BulkUpdateRequest(BaseModel):
+    image_ids: list[int]
+    year: int | None = None
+    month: int | None = None
+    title: str | None = None
+
+
+class DuplicateGroup(BaseModel):
+    images: list[ImageOut]
+    distance: int
+
+
+class AppSettings(BaseModel):
+    source_dir: str
+    output_dir: str
+    thumbnail_size: int
+    device: str
+
+
+class AppSettingsUpdate(BaseModel):
+    thumbnail_size: int | None = None
+    device: str | None = None

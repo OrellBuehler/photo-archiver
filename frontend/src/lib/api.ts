@@ -1,4 +1,4 @@
-import type { ImageListResponse, ImageStats, Image, Task } from './types';
+import type { ImageListResponse, ImageStats, Image, Task, AppSettings, DuplicateGroup } from './types';
 
 const BASE = '/api';
 
@@ -66,4 +66,40 @@ export async function getTasks(): Promise<Task[]> {
 
 export async function getTask(taskId: number): Promise<Task> {
   return fetchJSON<Task>(`${BASE}/tasks/${taskId}`);
+}
+
+export async function bulkDeleteImages(imageIds: number[]): Promise<{deleted: number}> {
+  return fetchJSON(`${BASE}/images/bulk-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_ids: imageIds }),
+  });
+}
+
+export async function scanDuplicates(): Promise<{status: string}> {
+  return fetchJSON(`${BASE}/duplicates/scan`, { method: 'POST' });
+}
+
+export async function getDuplicates(threshold: number = 6): Promise<DuplicateGroup[]> {
+  return fetchJSON<DuplicateGroup[]>(`${BASE}/duplicates?threshold=${threshold}`);
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  return fetchJSON<AppSettings>(`${BASE}/settings`);
+}
+
+export async function updateSettings(data: { thumbnail_size?: number; device?: string }): Promise<AppSettings> {
+  return fetchJSON<AppSettings>(`${BASE}/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function bulkUpdateImages(imageIds: number[], data: { year?: number; month?: number; title?: string }): Promise<{updated: number}> {
+  return fetchJSON(`${BASE}/images/bulk`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_ids: imageIds, ...data }),
+  });
 }

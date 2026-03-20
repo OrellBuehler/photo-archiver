@@ -17,6 +17,8 @@
   let selectedStatus = $state<string | null>(null);
   let selectedIds = $state(new Set<number>());
 
+  let pageImageIds = $derived(images.map((img) => img.id));
+
   async function loadImages() {
     loading = true;
     try {
@@ -35,6 +37,10 @@
 
   async function loadStats() {
     stats = await getImageStats();
+  }
+
+  async function refresh() {
+    await Promise.all([loadImages(), loadStats()]);
   }
 
   function handleFilter(year: number | null, status: string | null) {
@@ -109,8 +115,12 @@
 
 <ProcessingPanel
   {selectedIds}
+  totalOnPage={images.length}
+  {pageImageIds}
   onTaskCreated={(id) => {
     selectedIds = new Set();
     window.location.href = '/processing';
   }}
+  onSelectionChange={(ids) => { selectedIds = ids; }}
+  onRefresh={refresh}
 />
