@@ -1,9 +1,11 @@
 <script lang="ts">
   import '../app.css';
+  import { Toaster } from 'svelte-sonner';
 
   let { children } = $props();
 </script>
 
+<Toaster position="bottom-right" richColors />
 <div class="h-screen flex flex-col overflow-hidden">
   <header class="shrink-0 border-b bg-background">
     <div class="container mx-auto flex items-center justify-between px-4 py-3">

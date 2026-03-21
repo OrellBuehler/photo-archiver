@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { Image } from '$lib/types';
-  import { imageFileUrl, updateImage, rotateImage, createBatchTask } from '$lib/api';
+  import { imageFileUrl, updateImage, rotateImage, createBatchTask, getTask } from '$lib/api';
   import BeforeAfter from '$lib/components/BeforeAfter.svelte';
+  import { toast } from 'svelte-sonner';
 
   let { image: initialImage }: { image: Image } = $props();
 
@@ -18,23 +19,44 @@
   let rotating = $state(false);
   let processing = $state(false);
   let cacheBust = $state(Date.now());
+  let busy = $derived(rotating || processing);
 
   async function handleRotate(direction: 'left' | 'right') {
     rotating = true;
+    toast.info(`Rotating ${direction}...`);
     try {
       image = await rotateImage(image.id, direction);
       cacheBust = Date.now();
+      toast.success('Rotated');
+    } catch (e) {
+      toast.error(`Rotation failed: ${e instanceof Error ? e.message : 'unknown error'}`);
     } finally {
       rotating = false;
     }
   }
 
   async function handleProcess(steps: string[]) {
+    const label = steps.map(s => processSteps.find(p => p.key === s)?.label ?? s).join(', ');
     processing = true;
+    toast.info(`Starting ${label}...`);
     try {
-      await createBatchTask([image.id], steps);
+      const task = await createBatchTask([image.id], steps);
+      await pollTask(task.id);
+      toast.success(`${label} complete`);
+    } catch (e) {
+      toast.error(`${label} failed: ${e instanceof Error ? e.message : 'unknown error'}`);
     } finally {
       processing = false;
+    }
+  }
+
+  async function pollTask(taskId: number) {
+    while (true) {
+      await new Promise(r => setTimeout(r, 1000));
+      const task = await getTask(taskId);
+      if (task.status === 'completed') return;
+      if (task.status === 'failed') throw new Error(task.error_message ?? 'Task failed');
+      if (task.status === 'cancelled') throw new Error('Task cancelled');
     }
   }
 
@@ -124,12 +146,12 @@
     <div class="shrink-0 flex gap-2 mt-3">
       <button
         class="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary transition-colors disabled:opacity-50"
-        disabled={rotating}
+        disabled={busy}
         onclick={() => handleRotate('left')}
       >↶ Rotate Left</button>
       <button
         class="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary transition-colors disabled:opacity-50"
-        disabled={rotating}
+        disabled={busy}
         onclick={() => handleRotate('right')}
       >↷ Rotate Right</button>
     </div>
@@ -148,7 +170,7 @@
         {#each processSteps as step}
           <button
             class="rounded-md border px-2.5 py-1 text-xs hover:bg-secondary transition-colors disabled:opacity-50"
-            disabled={processing}
+            disabled={busy}
             onclick={() => handleProcess([step.key])}
           >{step.label}</button>
         {/each}
