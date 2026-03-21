@@ -58,7 +58,7 @@
   onMount(loadTasks);
 </script>
 
-<div class="py-4 space-y-8">
+<div class="py-4 space-y-8 h-full overflow-y-auto">
   <h1 class="text-2xl font-bold">Processing</h1>
 
   <div class="rounded-lg border p-4 space-y-3">

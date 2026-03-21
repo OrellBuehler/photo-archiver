@@ -68,7 +68,7 @@
   onMount(loadDuplicates);
 </script>
 
-<div class="py-4 space-y-6">
+<div class="py-4 space-y-6 h-full overflow-y-auto">
   <div class="flex items-center gap-4 flex-wrap">
     <h1 class="text-2xl font-bold">Duplicates</h1>
     <button

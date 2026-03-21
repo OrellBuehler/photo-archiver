@@ -36,7 +36,7 @@
   onMount(load);
 </script>
 
-<div class="py-4 space-y-8">
+<div class="py-4 space-y-8 h-full overflow-y-auto">
   <h1 class="text-2xl font-bold">Settings</h1>
 
   {#if loading}
