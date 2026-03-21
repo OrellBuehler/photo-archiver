@@ -1,0 +1,93 @@
+# Scan Quality Improvements
+
+## Context
+
+This project restores old photos scanned from a flatbed scanner. The current pipeline has three steps: organize, orient, and enhance (Real-ESRGAN + GFPGAN). Scanned photos commonly have skew from misalignment, color fading/yellowing from age, and dust spots or scratches. These issues should be cleaned up before AI enhancement for better results.
+
+## Design
+
+Three new independent pipeline steps that slot between orient and enhance:
+
+```
+organize → orient → deskew → restore_color → remove_dust → enhance
+```
+
+Each step is independently toggleable in the processing UI.
+
+### 1. Deskew (`backend/app/services/deskewer.py`)
+
+Detects and corrects rotation from misaligned scans.
+
+- Convert to grayscale, apply Canny edge detection
+- Use Hough line transform to detect dominant lines
+- Calculate median angle from detected lines
+- Rotate image to correct the skew using `cv2.warpAffine`
+- Crop black borders introduced by rotation
+- Skip correction if detected angle is below a threshold (e.g. < 0.5 degrees)
+- Modifies file in-place
+- Function signature: `deskew_image(file_path: str) -> None`
+
+### 2. Color Restoration (`backend/app/services/color_restorer.py`)
+
+Fixes age-related color degradation: yellowing, fading, low contrast.
+
+- Convert to LAB color space
+- Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) on L channel for contrast
+- Reduce yellow cast: shift A and B channels toward neutral based on their mean deviation
+- Gray world white balance as a secondary correction
+- Light saturation boost (convert to HSV, scale S channel by ~1.15) to compensate for fading
+- Modifies file in-place
+- Function signature: `restore_color(file_path: str) -> None`
+
+### 3. Dust Removal (`backend/app/services/dust_remover.py`)
+
+Removes dust spots and minor scratches from scans.
+
+- Convert to grayscale
+- Detect bright spots: threshold high-intensity outliers, filter by size (small contours only)
+- Detect dark spots: inverse threshold for dark specks, same size filter
+- Combine into an inpainting mask
+- Use `cv2.inpaint` with Telea algorithm (radius ~3px)
+- Conservative detection: only target spots smaller than a max area (e.g. 50px²) to avoid removing real detail
+- Modifies file in-place
+- Function signature: `remove_dust(file_path: str) -> None`
+
+### Pipeline Integration (`backend/app/services/pipeline.py`)
+
+Add three new step handlers in `run_task`, following the same pattern as orient:
+
+```python
+elif step == "deskew":
+    if organized_path:
+        full_path = os.path.join(settings.output_dir, organized_path)
+        await asyncio.to_thread(deskew_image, full_path)
+
+elif step == "restore_color":
+    if organized_path:
+        full_path = os.path.join(settings.output_dir, organized_path)
+        await asyncio.to_thread(restore_color, full_path)
+
+elif step == "remove_dust":
+    if organized_path:
+        full_path = os.path.join(settings.output_dir, organized_path)
+        await asyncio.to_thread(remove_dust, full_path)
+```
+
+### Frontend (`frontend/src/routes/processing/+page.svelte`)
+
+Add three new toggles to the step selection area, between orient and enhance:
+- "Deskew" — straighten tilted scans
+- "Restore Color" — fix fading and yellowing
+- "Remove Dust" — clean dust spots and scratches
+
+## Files Changed
+
+- `backend/app/services/deskewer.py` — new
+- `backend/app/services/color_restorer.py` — new
+- `backend/app/services/dust_remover.py` — new
+- `backend/app/services/pipeline.py` — modified (add three step handlers)
+- `frontend/src/routes/processing/+page.svelte` — modified (add three toggles)
+
+## Dependencies
+
+No new dependencies. All operations use OpenCV (`cv2`) and NumPy, both already installed.
