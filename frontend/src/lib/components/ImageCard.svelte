@@ -14,27 +14,27 @@
 </script>
 
 <div
-  class="group relative cursor-pointer overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-lg"
-  class:ring-2={selected}
-  class:ring-primary={selected}
+  class="group relative cursor-pointer overflow-hidden rounded-lg transition-[box-shadow,outline] hover:shadow-md"
+  class:outline-2={selected}
+  class:outline-primary={selected}
   role="button"
   tabindex="0"
   onclick={() => onclick?.(image)}
   onkeydown={(e) => e.key === 'Enter' && onclick?.(image)}
 >
   {#if onselect}
-    <div class="absolute top-2 left-2 z-10">
+    <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity" class:opacity-100={selected}>
       <input
         type="checkbox"
         checked={selected}
         onclick={(e) => e.stopPropagation()}
         onchange={(e) => onselect?.(image.id, e.currentTarget.checked)}
-        class="h-4 w-4 rounded border-gray-300"
+        class="h-4 w-4 rounded border-gray-300 shadow-sm"
       />
     </div>
   {/if}
 
-  <div class="relative aspect-[4/3] bg-muted">
+  <div class="relative aspect-[4/3] bg-muted rounded-lg overflow-hidden">
     {#if !loaded}
       <div class="h-full w-full animate-pulse bg-muted"></div>
     {/if}
@@ -52,16 +52,13 @@
     {/if}
   </div>
 
-  <div class="p-2">
-    <p class="text-sm font-medium truncate">{image.title || image.scan_id || image.filename}</p>
-    <div class="flex items-center gap-1 mt-1">
+  <div class="px-0.5 pt-1.5 pb-1 opacity-80 group-hover:opacity-100 transition-opacity">
+    <p class="text-xs font-medium truncate">{image.title || image.scan_id || image.filename}</p>
+    <div class="flex items-center gap-1 mt-0.5">
       {#if image.year}
-        <span class="text-xs text-muted-foreground">{image.year}</span>
+        <span class="text-[11px] text-muted-foreground">{image.year}{#if image.month}/{String(image.month).padStart(2, '0')}{/if}</span>
       {/if}
-      {#if image.month}
-        <span class="text-xs text-muted-foreground">/ {String(image.month).padStart(2, '0')}</span>
-      {/if}
-      <span class="ml-auto text-xs px-1.5 py-0.5 rounded-full {image.status === 'enhanced' ? 'bg-green-100 text-green-700' : image.status === 'organized' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}">{image.status}</span>
+      <span class="ml-auto text-[11px] px-1.5 py-0.5 rounded-full {image.status === 'enhanced' ? 'bg-green-100 text-green-700' : image.status === 'organized' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}">{image.status}</span>
     </div>
   </div>
 </div>

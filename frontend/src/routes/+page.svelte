@@ -97,13 +97,13 @@
 
   <div class="flex-1 min-h-0 overflow-y-auto py-4">
     {#if loading}
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 lg:gap-4">
         {#each Array(12) as _}
-          <div class="rounded-lg border overflow-hidden">
-            <div class="aspect-[4/3] bg-muted animate-pulse"></div>
-            <div class="p-2 space-y-2">
-              <div class="h-4 bg-muted animate-pulse rounded"></div>
-              <div class="h-3 bg-muted animate-pulse rounded w-2/3"></div>
+          <div>
+            <div class="aspect-[4/3] bg-muted animate-pulse rounded-lg"></div>
+            <div class="pt-1.5 space-y-1">
+              <div class="h-3 bg-muted animate-pulse rounded w-3/4"></div>
+              <div class="h-3 bg-muted animate-pulse rounded w-1/3"></div>
             </div>
           </div>
         {/each}

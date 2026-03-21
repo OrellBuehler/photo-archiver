@@ -58,10 +58,8 @@
   onMount(loadTasks);
 </script>
 
-<div class="space-y-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-2xl font-bold">Processing</h1>
-  </div>
+<div class="py-4 space-y-8">
+  <h1 class="text-2xl font-bold">Processing</h1>
 
   <div class="rounded-lg border p-4 space-y-3">
     <h2 class="font-medium">Process All Images</h2>

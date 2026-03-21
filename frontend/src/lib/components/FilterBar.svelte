@@ -16,11 +16,11 @@
   let statuses = ['source', 'organized', 'enhanced'];
 </script>
 
-<div class="flex flex-wrap items-center gap-3 py-4">
+<div class="flex flex-wrap items-center gap-3 py-3">
   <div class="flex items-center gap-2">
-    <label class="text-sm font-medium">Year:</label>
+    <label class="text-xs text-muted-foreground uppercase tracking-wide">Year</label>
     <select
-      class="rounded-md border bg-background px-3 py-1.5 text-sm"
+      class="rounded-md border bg-background px-2.5 py-1 text-sm"
       value={selectedYear ?? ''}
       onchange={(e) => {
         const val = e.currentTarget.value;
@@ -35,20 +35,20 @@
   </div>
 
   <div class="flex items-center gap-2">
-    <label class="text-sm font-medium">Status:</label>
-    <div class="flex gap-1">
+    <label class="text-xs text-muted-foreground uppercase tracking-wide">Status</label>
+    <div class="flex gap-0.5">
       <button
-        class="rounded-md px-3 py-1.5 text-sm transition-colors {selectedStatus === null ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'}"
+        class="rounded-md px-2.5 py-1 text-sm transition-colors {selectedStatus === null ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}"
         onclick={() => onfilter(selectedYear, null)}
       >All</button>
       {#each statuses as status}
         <button
-          class="rounded-md px-3 py-1.5 text-sm transition-colors {selectedStatus === status ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'}"
+          class="rounded-md px-2.5 py-1 text-sm transition-colors capitalize {selectedStatus === status ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}"
           onclick={() => onfilter(selectedYear, status)}
         >{status}</button>
       {/each}
     </div>
   </div>
 
-  <span class="ml-auto text-sm text-muted-foreground">{total} images</span>
+  <span class="ml-auto text-xs text-muted-foreground">{total} images</span>
 </div>
