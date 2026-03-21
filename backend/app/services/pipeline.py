@@ -152,6 +152,12 @@ async def run_task(task_id: int):
                             full_path = os.path.join(settings.output_dir, organized_path)
                             step_fn = {"crop": crop_image, "auto_orient": auto_orient_image, "deskew": deskew_image, "restore_color": restore_color, "remove_dust": remove_dust}[step]
                             await asyncio.to_thread(step_fn, full_path)
+                            async with get_db() as db:
+                                await db.execute(
+                                    "UPDATE images SET updated_at = datetime('now') WHERE id = ?",
+                                    (image_id,)
+                                )
+                                await db.commit()
 
                         elif step == "enhance":
                             from app.services.enhancer import enhance_image

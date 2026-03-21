@@ -153,7 +153,10 @@ async def get_thumbnail(image_id: int):
 
     thumb_path = get_thumbnail_path(image_id)
     if not os.path.exists(thumb_path):
-        source_path = os.path.join(settings.source_dir, row["source_path"])
+        if row["organized_path"]:
+            source_path = os.path.join(settings.output_dir, row["organized_path"])
+        else:
+            source_path = os.path.join(settings.source_dir, row["source_path"])
         if not os.path.exists(source_path):
             raise HTTPException(404, "Source file not found")
         await asyncio.to_thread(generate_thumbnail, source_path, image_id)
