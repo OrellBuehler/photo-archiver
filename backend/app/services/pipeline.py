@@ -5,6 +5,9 @@ from app.config import settings
 from app.db import get_db
 from app.services.organizer import organize_image
 from app.services.orienter import orient_image
+from app.services.deskewer import deskew_image
+from app.services.color_restorer import restore_color
+from app.services.dust_remover import remove_dust
 from app.routers.ws import manager
 
 
@@ -111,6 +114,14 @@ async def run_task(task_id: int):
                             if organized_path:
                                 full_path = os.path.join(settings.output_dir, organized_path)
                                 await asyncio.to_thread(orient_image, full_path)
+
+                        elif step in ("deskew", "restore_color", "remove_dust"):
+                            if organized_path:
+                                full_path = os.path.join(settings.output_dir, organized_path)
+                            else:
+                                full_path = os.path.join(settings.source_dir, item["source_path"])
+                            step_fn = {"deskew": deskew_image, "restore_color": restore_color, "remove_dust": remove_dust}[step]
+                            await asyncio.to_thread(step_fn, full_path)
 
                         elif step == "enhance":
                             from app.services.enhancer import enhance_image

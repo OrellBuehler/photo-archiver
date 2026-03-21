@@ -10,7 +10,7 @@
     onRefresh?: () => void;
   } = $props();
 
-  let steps = $state({ organize: true, orient: true, enhance: false });
+  let steps = $state({ organize: true, orient: true, deskew: false, restore_color: false, remove_dust: false, enhance: false });
   let processing = $state(false);
   let deleting = $state(false);
   let saving = $state(false);
@@ -104,6 +104,18 @@
         <label class="flex items-center gap-1.5 text-sm">
           <input type="checkbox" bind:checked={steps.orient} class="rounded" />
           Orient
+        </label>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input type="checkbox" bind:checked={steps.deskew} class="rounded" />
+          Deskew
+        </label>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input type="checkbox" bind:checked={steps.restore_color} class="rounded" />
+          Restore Color
+        </label>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input type="checkbox" bind:checked={steps.remove_dust} class="rounded" />
+          Remove Dust
         </label>
         <label class="flex items-center gap-1.5 text-sm">
           <input type="checkbox" bind:checked={steps.enhance} class="rounded" />
