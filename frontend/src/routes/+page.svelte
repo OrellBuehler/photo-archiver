@@ -2,13 +2,13 @@
   import { onMount } from 'svelte';
   import { getImages, getImageStats } from '$lib/api';
   import { subscribe } from '$lib/ws';
-  import type { Image, ImageStats } from '$lib/types';
+  import type { Image, FilterCounts } from '$lib/types';
   import ImageGrid from '$lib/components/ImageGrid.svelte';
   import FilterBar from '$lib/components/FilterBar.svelte';
   import ProcessingPanel from '$lib/components/ProcessingPanel.svelte';
 
   let images = $state<Image[]>([]);
-  let stats = $state<ImageStats[]>([]);
+  let stats = $state<FilterCounts | null>(null);
   let total = $state(0);
   let page = $state(1);
   let perPage = 60;

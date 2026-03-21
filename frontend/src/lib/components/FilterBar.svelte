@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { ImageStats } from '$lib/types';
+  import type { FilterCounts } from '$lib/types';
 
   let { stats, selectedYear, selectedStatus, total, onfilter }: {
-    stats: ImageStats[];
+    stats: FilterCounts | null;
     selectedYear: number | null;
     selectedStatus: string | null;
     total: number;
@@ -10,7 +10,7 @@
   } = $props();
 
   let years = $derived(
-    [...new Set(stats.map(s => s.year).filter((y): y is number => y !== null))].sort()
+    (stats?.years ?? []).map(y => y.value).filter((y): y is number => typeof y === 'number').sort()
   );
 
   let statuses = ['source', 'organized', 'enhanced'];

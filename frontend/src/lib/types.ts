@@ -30,6 +30,27 @@ export interface ImageStats {
   count: number;
 }
 
+export interface FilterCountItem {
+  value: string | number | null;
+  count: number;
+}
+
+export interface FilterCounts {
+  years: FilterCountItem[];
+  months: FilterCountItem[];
+  statuses: FilterCountItem[];
+  steps: FilterCountItem[];
+  total: number;
+}
+
+export interface FilterParams {
+  year?: number | null;
+  month?: number | null;
+  status?: string | null;
+  step?: string | null;
+  year_unknown?: boolean | null;
+}
+
 export interface Task {
   id: number;
   status: string;
