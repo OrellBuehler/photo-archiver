@@ -26,7 +26,7 @@ async def _broadcast(msg: dict):
     await manager.broadcast(msg)
 
 
-async def _auto_organize(item, image_id):
+async def auto_organize(item, image_id):
     organized_path = await asyncio.to_thread(
         organize_image,
         item["source_path"],
@@ -38,6 +38,10 @@ async def _auto_organize(item, image_id):
         await db.execute(
             "UPDATE images SET organized_path = ?, status = 'organized', updated_at = datetime('now') WHERE id = ?",
             (organized_path, image_id)
+        )
+        await db.execute(
+            "INSERT INTO image_history (image_id, step) VALUES (?, 'organize')",
+            (image_id,)
         )
         await db.commit()
     return organized_path
@@ -136,13 +140,14 @@ async def run_task(task_id: int):
                                 await db.commit()
 
                         elif step == "orient":
-                            if organized_path:
-                                full_path = os.path.join(settings.output_dir, organized_path)
-                                await asyncio.to_thread(orient_image, full_path)
+                            if not organized_path:
+                                organized_path = await auto_organize(item, image_id)
+                            full_path = os.path.join(settings.output_dir, organized_path)
+                            await asyncio.to_thread(orient_image, full_path)
 
                         elif step in ("auto_orient", "deskew", "restore_color", "remove_dust"):
                             if not organized_path:
-                                organized_path = await _auto_organize(item, image_id)
+                                organized_path = await auto_organize(item, image_id)
                             full_path = os.path.join(settings.output_dir, organized_path)
                             step_fn = {"auto_orient": auto_orient_image, "deskew": deskew_image, "restore_color": restore_color, "remove_dust": remove_dust}[step]
                             await asyncio.to_thread(step_fn, full_path)
@@ -150,7 +155,7 @@ async def run_task(task_id: int):
                         elif step == "enhance":
                             from app.services.enhancer import enhance_image
                             if not organized_path:
-                                organized_path = await _auto_organize(item, image_id)
+                                organized_path = await auto_organize(item, image_id)
                             source_for_enhance = os.path.join(settings.output_dir, organized_path)
                             enhanced_rel = organized_path.replace("organized/", "enhanced/", 1)
 

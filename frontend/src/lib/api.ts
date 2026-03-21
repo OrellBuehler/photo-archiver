@@ -2,11 +2,21 @@ import type { ImageListResponse, ImageStats, Image, ImageHistory, Task, AppSetti
 
 const BASE = '/api';
 
+class ApiError extends Error {
+  status: number;
+  constructor(status: number, statusText: string) {
+    super(`${status} ${statusText}`);
+    this.status = status;
+  }
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
   return res.json();
 }
+
+export { ApiError };
 
 export async function getImages(params: {
   year?: number | null;

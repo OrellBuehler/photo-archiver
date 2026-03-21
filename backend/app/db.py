@@ -56,6 +56,8 @@ async def init_db():
                 created_at TEXT DEFAULT (datetime('now'))
             );
 
+            CREATE INDEX IF NOT EXISTS idx_image_history_image_id ON image_history(image_id);
+
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL

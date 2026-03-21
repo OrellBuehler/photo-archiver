@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Image } from '$lib/types';
-  import { imageFileUrl, updateImage, rotateImage, createBatchTask, getTask, getImage, getImageHistory } from '$lib/api';
+  import { imageFileUrl, updateImage, rotateImage, createBatchTask, getTask, getImage, getImageHistory, ApiError } from '$lib/api';
   import type { ImageHistory } from '$lib/types';
   import { onMount } from 'svelte';
   import BeforeAfter from '$lib/components/BeforeAfter.svelte';
@@ -45,8 +45,8 @@
       toast.success('Rotated');
       loadHistory();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'unknown error';
-      toast.error(msg.includes('409') ? 'Image is currently being processed' : `Rotation failed: ${msg}`);
+      if (e instanceof ApiError && e.status === 409) toast.error('Image is currently being processed');
+      else toast.error(`Rotation failed: ${e instanceof Error ? e.message : 'unknown error'}`);
     } finally {
       rotating = false;
     }
@@ -65,8 +65,8 @@
       toast.success(`${label} complete`);
       loadHistory();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'unknown error';
-      toast.error(msg.includes('409') ? 'Image is currently being processed' : `${label} failed: ${msg}`);
+      if (e instanceof ApiError && e.status === 409) toast.error('Image is currently being processed');
+      else toast.error(`${label} failed: ${e instanceof Error ? e.message : 'unknown error'}`);
     } finally {
       processing = false;
     }

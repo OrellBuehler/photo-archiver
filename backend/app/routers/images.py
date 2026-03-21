@@ -7,8 +7,7 @@ from app.config import settings
 from app.models import ImageOut, ImageUpdate, ImageListResponse, ImageStats, ImageHistoryOut, BulkDeleteRequest, BulkUpdateRequest
 from app.utils.thumbnails import generate_thumbnail, get_thumbnail_path
 from app.services.rotator import rotate_image
-from app.services.organizer import organize_image
-from app.services.pipeline import is_image_processing
+from app.services.pipeline import is_image_processing, auto_organize
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
@@ -132,16 +131,7 @@ async def rotate_image_endpoint(image_id: int, direction: str = Query(..., patte
         row = dict(row)
 
     if not row["organized_path"]:
-        organized_path = await asyncio.to_thread(
-            organize_image, row["source_path"], row["scan_id"], row["year"], row["month"]
-        )
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE images SET organized_path = ?, status = 'organized', updated_at = datetime('now') WHERE id = ?",
-                (organized_path, image_id)
-            )
-            await db.commit()
-        row["organized_path"] = organized_path
+        row["organized_path"] = await auto_organize(row, image_id)
 
     file_path = os.path.join(settings.output_dir, row["organized_path"])
 
