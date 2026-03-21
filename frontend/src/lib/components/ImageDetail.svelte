@@ -127,7 +127,13 @@
   ];
 </script>
 
-<div class="flex flex-col lg:flex-row gap-6 h-full py-4">
+<div class="flex flex-col h-full py-4">
+  <div class="shrink-0 mb-4">
+    <a href="/" class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+      ← Back to Gallery
+    </a>
+  </div>
+  <div class="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
   <!-- Image viewer -->
   <div class="flex-1 min-w-0 flex flex-col min-h-0">
     {#if variants().length > 1}
@@ -280,8 +286,6 @@
       {/if}
     </div>
 
-    <a href="/" class="block text-center text-sm text-muted-foreground hover:text-foreground transition-colors">
-      ← Back to Gallery
-    </a>
+  </div>
   </div>
 </div>
