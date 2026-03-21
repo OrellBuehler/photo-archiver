@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Image } from '$lib/types';
-  import { imageFileUrl, updateImage } from '$lib/api';
+  import { imageFileUrl, updateImage, rotateImage } from '$lib/api';
   import BeforeAfter from '$lib/components/BeforeAfter.svelte';
 
   let { image: initialImage }: { image: Image } = $props();
@@ -15,6 +15,18 @@
 
   let activeVariant = $state<string>('source');
   let showCompare = $state(false);
+  let rotating = $state(false);
+  let cacheBust = $state(Date.now());
+
+  async function handleRotate(direction: 'left' | 'right') {
+    rotating = true;
+    try {
+      image = await rotateImage(image.id, direction);
+      cacheBust = Date.now();
+    } finally {
+      rotating = false;
+    }
+  }
 
   let variants = $derived(() => {
     const v: { key: string; label: string }[] = [{ key: 'source', label: 'Source' }];
@@ -81,12 +93,24 @@
     {:else}
       <div class="rounded-lg border overflow-hidden bg-muted">
         <img
-          src={imageFileUrl(image.id, activeVariant)}
+          src="{imageFileUrl(image.id, activeVariant)}&t={cacheBust}"
           alt={image.title || image.filename}
           class="w-full h-auto"
         />
       </div>
     {/if}
+    <div class="flex gap-2 mt-3">
+      <button
+        class="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary transition-colors disabled:opacity-50"
+        disabled={rotating}
+        onclick={() => handleRotate('left')}
+      >↶ Rotate Left</button>
+      <button
+        class="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary transition-colors disabled:opacity-50"
+        disabled={rotating}
+        onclick={() => handleRotate('right')}
+      >↷ Rotate Right</button>
+    </div>
   </div>
 
   <!-- Metadata panel -->

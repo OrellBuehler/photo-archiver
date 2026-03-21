@@ -6,6 +6,7 @@ from app.db import get_db
 from app.config import settings
 from app.models import ImageOut, ImageUpdate, ImageListResponse, ImageStats, BulkDeleteRequest, BulkUpdateRequest
 from app.utils.thumbnails import generate_thumbnail, get_thumbnail_path
+from app.services.rotator import rotate_image
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
@@ -114,6 +115,45 @@ async def get_thumbnail(image_id: int):
         await asyncio.to_thread(generate_thumbnail, source_path, image_id)
 
     return FileResponse(thumb_path, media_type="image/jpeg")
+
+
+@router.post("/{image_id}/rotate", response_model=ImageOut)
+async def rotate_image_endpoint(image_id: int, direction: str = Query(..., pattern="^(left|right)$")):
+    async with get_db() as db:
+        cursor = await db.execute("SELECT * FROM images WHERE id = ?", (image_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(404, "Image not found")
+        row = dict(row)
+
+    if row["organized_path"]:
+        file_path = os.path.join(settings.output_dir, row["organized_path"])
+    else:
+        file_path = os.path.join(settings.source_dir, row["source_path"])
+
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "File not found")
+
+    w, h = await asyncio.to_thread(rotate_image, file_path, direction)
+
+    if row["enhanced_path"]:
+        enhanced_path = os.path.join(settings.output_dir, row["enhanced_path"])
+        if os.path.exists(enhanced_path):
+            await asyncio.to_thread(rotate_image, enhanced_path, direction)
+
+    thumb_path = get_thumbnail_path(image_id)
+    if os.path.exists(thumb_path):
+        os.remove(thumb_path)
+
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE images SET width = ?, height = ?, updated_at = datetime('now') WHERE id = ?",
+            (w, h, image_id)
+        )
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM images WHERE id = ?", (image_id,))
+        row = await cursor.fetchone()
+        return ImageOut(**dict(row))
 
 
 @router.patch("/{image_id}", response_model=ImageOut)

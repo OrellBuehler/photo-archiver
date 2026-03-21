@@ -48,6 +48,10 @@ export function imageFileUrl(id: number, variant: string = 'source'): string {
   return `${BASE}/images/${id}/file?variant=${variant}`;
 }
 
+export async function rotateImage(id: number, direction: 'left' | 'right'): Promise<Image> {
+  return fetchJSON<Image>(`${BASE}/images/${id}/rotate?direction=${direction}`, { method: 'POST' });
+}
+
 export async function createBatchTask(imageIds: number[] | 'all', steps: string[]): Promise<Task> {
   return fetchJSON<Task>(`${BASE}/processing/batch`, {
     method: 'POST',
