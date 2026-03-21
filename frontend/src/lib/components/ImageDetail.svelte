@@ -119,6 +119,7 @@
 
   const processSteps = [
     { key: 'organize', label: 'Organize' },
+    { key: 'crop', label: 'Crop' },
     { key: 'auto_orient', label: 'Orient' },
     { key: 'deskew', label: 'Deskew' },
     { key: 'restore_color', label: 'Restore Color' },

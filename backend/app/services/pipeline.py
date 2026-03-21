@@ -8,6 +8,7 @@ from app.services.orienter import orient_image
 from app.services.deskewer import deskew_image
 from app.services.color_restorer import restore_color
 from app.services.dust_remover import remove_dust
+from app.services.cropper import crop_image
 from app.services.auto_orienter import auto_orient_image
 from app.utils.thumbnails import get_thumbnail_path
 from app.routers.ws import manager
@@ -145,11 +146,11 @@ async def run_task(task_id: int):
                             full_path = os.path.join(settings.output_dir, organized_path)
                             await asyncio.to_thread(orient_image, full_path)
 
-                        elif step in ("auto_orient", "deskew", "restore_color", "remove_dust"):
+                        elif step in ("crop", "auto_orient", "deskew", "restore_color", "remove_dust"):
                             if not organized_path:
                                 organized_path = await auto_organize(item, image_id)
                             full_path = os.path.join(settings.output_dir, organized_path)
-                            step_fn = {"auto_orient": auto_orient_image, "deskew": deskew_image, "restore_color": restore_color, "remove_dust": remove_dust}[step]
+                            step_fn = {"crop": crop_image, "auto_orient": auto_orient_image, "deskew": deskew_image, "restore_color": restore_color, "remove_dust": remove_dust}[step]
                             await asyncio.to_thread(step_fn, full_path)
 
                         elif step == "enhance":

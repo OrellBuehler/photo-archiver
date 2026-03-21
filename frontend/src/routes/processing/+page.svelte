@@ -8,7 +8,7 @@
   let loading = $state(true);
   let activeTaskId = $state<number | null>(null);
 
-  let steps = $state({ organize: true, auto_orient: false, deskew: false, restore_color: false, remove_dust: false, enhance: false });
+  let steps = $state({ organize: true, crop: false, auto_orient: false, deskew: false, restore_color: false, remove_dust: false, enhance: false });
   let processing = $state(false);
 
   async function loadTasks() {
@@ -67,6 +67,10 @@
       <label class="flex items-center gap-1.5 text-sm">
         <input type="checkbox" bind:checked={steps.organize} class="rounded" />
         Organize
+      </label>
+      <label class="flex items-center gap-1.5 text-sm">
+        <input type="checkbox" bind:checked={steps.crop} class="rounded" />
+        Crop
       </label>
       <label class="flex items-center gap-1.5 text-sm">
         <input type="checkbox" bind:checked={steps.auto_orient} class="rounded" />

@@ -4,6 +4,7 @@
   const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const STEP_LABELS: Record<string, string> = {
     organize: 'Organize',
+    crop: 'Crop',
     auto_orient: 'Auto Orient',
     deskew: 'Deskew',
     restore_color: 'Restore Color',
