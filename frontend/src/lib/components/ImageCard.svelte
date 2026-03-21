@@ -39,7 +39,7 @@
       <div class="h-full w-full animate-pulse bg-muted"></div>
     {/if}
     <img
-      src={thumbnailUrl(image.id)}
+      src="{thumbnailUrl(image.id)}?t={image.updated_at}"
       alt={image.title || image.filename}
       class="h-full w-full object-cover"
       class:opacity-0={!loaded}
