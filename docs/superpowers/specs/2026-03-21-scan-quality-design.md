@@ -21,10 +21,11 @@ Detects and corrects rotation from misaligned scans.
 - Convert to grayscale, apply Canny edge detection
 - Use Hough line transform to detect dominant lines
 - Calculate median angle from detected lines
-- Rotate image to correct the skew using `cv2.warpAffine`
-- Crop black borders introduced by rotation
-- Skip correction if detected angle is below a threshold (e.g. < 0.5 degrees)
-- Modifies file in-place
+- Rotate image using `cv2.getRotationMatrix2D` with `BORDER_REPLICATE` to avoid black borders
+- Then compute the largest axis-aligned inscribed rectangle and crop to it
+- Skip correction if detected angle is below 0.5 degrees
+- Write with high JPEG quality (`cv2.IMWRITE_JPEG_QUALITY, 97`) to minimize recompression loss
+- Let exceptions propagate (pipeline catches per-image)
 - Function signature: `deskew_image(file_path: str) -> None`
 
 ### 2. Color Restoration (`backend/app/services/color_restorer.py`)
@@ -32,11 +33,11 @@ Detects and corrects rotation from misaligned scans.
 Fixes age-related color degradation: yellowing, fading, low contrast.
 
 - Convert to LAB color space
-- Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) on L channel for contrast
-- Reduce yellow cast: shift A and B channels toward neutral based on their mean deviation
-- Gray world white balance as a secondary correction
+- Apply CLAHE on L channel (`clipLimit=2.0`, `tileGridSize=(8,8)`) for contrast
+- Reduce yellow cast: shift A and B channels toward neutral based on their mean deviation; skip if mean deviation < 3 (photo doesn't need it)
 - Light saturation boost (convert to HSV, scale S channel by ~1.15) to compensate for fading
-- Modifies file in-place
+- Write with high JPEG quality (`cv2.IMWRITE_JPEG_QUALITY, 97`)
+- Let exceptions propagate
 - Function signature: `restore_color(file_path: str) -> None`
 
 ### 3. Dust Removal (`backend/app/services/dust_remover.py`)
@@ -44,12 +45,12 @@ Fixes age-related color degradation: yellowing, fading, low contrast.
 Removes dust spots and minor scratches from scans.
 
 - Convert to grayscale
-- Detect bright spots: threshold high-intensity outliers, filter by size (small contours only)
-- Detect dark spots: inverse threshold for dark specks, same size filter
+- Detect bright spots: `cv2.adaptiveThreshold` (Gaussian, blockSize=11) to handle varying exposure, filter contours by area (< 50px²)
+- Detect dark spots: same adaptive threshold on inverted image, same size filter
 - Combine into an inpainting mask
-- Use `cv2.inpaint` with Telea algorithm (radius ~3px)
-- Conservative detection: only target spots smaller than a max area (e.g. 50px²) to avoid removing real detail
-- Modifies file in-place
+- Use `cv2.inpaint` with Telea algorithm (radius 3px)
+- Write with high JPEG quality (`cv2.IMWRITE_JPEG_QUALITY, 97`)
+- Let exceptions propagate
 - Function signature: `remove_dust(file_path: str) -> None`
 
 ### Pipeline Integration (`backend/app/services/pipeline.py`)
@@ -73,12 +74,18 @@ elif step == "remove_dust":
         await asyncio.to_thread(remove_dust, full_path)
 ```
 
-### Frontend (`frontend/src/routes/processing/+page.svelte`)
+### Frontend
 
 Add three new toggles to the step selection area, between orient and enhance:
 - "Deskew" — straighten tilted scans
 - "Restore Color" — fix fading and yellowing
 - "Remove Dust" — clean dust spots and scratches
+
+Both `processing/+page.svelte` and `ProcessingPanel.svelte` have a `steps` state object that needs updating.
+
+### Pipeline fallback
+
+When `organized_path` is None, fall back to `source_path` (same as the enhance step does). This allows running cleanup steps without organize.
 
 ## Files Changed
 
@@ -87,6 +94,7 @@ Add three new toggles to the step selection area, between orient and enhance:
 - `backend/app/services/dust_remover.py` — new
 - `backend/app/services/pipeline.py` — modified (add three step handlers)
 - `frontend/src/routes/processing/+page.svelte` — modified (add three toggles)
+- `frontend/src/lib/components/ProcessingPanel.svelte` — modified (add three toggles)
 
 ## Dependencies
 
