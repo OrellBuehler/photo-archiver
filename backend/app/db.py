@@ -49,6 +49,13 @@ async def init_db():
                 completed_at TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS image_history (
+                id INTEGER PRIMARY KEY,
+                image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+                step TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL

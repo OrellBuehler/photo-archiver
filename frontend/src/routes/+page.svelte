@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getImages, getImageStats } from '$lib/api';
+  import { subscribe } from '$lib/ws';
   import type { Image, ImageStats } from '$lib/types';
   import ImageGrid from '$lib/components/ImageGrid.svelte';
   import FilterBar from '$lib/components/FilterBar.svelte';
@@ -16,6 +17,7 @@
   let selectedYear = $state<number | null>(null);
   let selectedStatus = $state<string | null>(null);
   let selectedIds = $state(new Set<number>());
+  let processingIds = $state(new Set<number>());
 
   let pageImageIds = $derived(images.map((img) => img.id));
 
@@ -60,9 +62,23 @@
     window.location.href = `/image/${image.id}`;
   }
 
+  let unsubscribe: (() => void) | undefined;
+
   onMount(() => {
     loadStats();
     loadImages();
+    unsubscribe = subscribe((msg) => {
+      if (msg.type === 'image_started' && msg.image_id) {
+        processingIds = new Set([...processingIds, msg.image_id]);
+      } else if (msg.type === 'progress' && msg.image_id) {
+        const next = new Set(processingIds);
+        next.delete(msg.image_id);
+        processingIds = next;
+      } else if (msg.type === 'task_completed' || msg.type === 'task_failed') {
+        processingIds = new Set();
+      }
+    });
+    return () => unsubscribe?.();
   });
 
   let totalPages = $derived(Math.ceil(total / perPage));
@@ -96,6 +112,7 @@
       <ImageGrid
         {images}
         {selectedIds}
+        {processingIds}
         onselect={handleSelect}
         onclick={handleClick}
       />

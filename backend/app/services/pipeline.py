@@ -15,10 +15,32 @@ from app.routers.ws import manager
 
 _processing_lock = asyncio.Lock()
 _current_task_id: int | None = None
+_processing_images: set[int] = set()
+
+
+def is_image_processing(image_id: int) -> bool:
+    return image_id in _processing_images
 
 
 async def _broadcast(msg: dict):
     await manager.broadcast(msg)
+
+
+async def _auto_organize(item, image_id):
+    organized_path = await asyncio.to_thread(
+        organize_image,
+        item["source_path"],
+        item["scan_id"],
+        item["year"],
+        item["month"],
+    )
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE images SET organized_path = ?, status = 'organized', updated_at = datetime('now') WHERE id = ?",
+            (organized_path, image_id)
+        )
+        await db.commit()
+    return organized_path
 
 
 async def run_task(task_id: int):
@@ -65,21 +87,22 @@ async def run_task(task_id: int):
                         break
 
                 image_id = item["image_id"]
-
-                async with get_db() as db:
-                    await db.execute(
-                        "UPDATE task_items SET status = 'running', started_at = datetime('now') WHERE id = ?",
-                        (item["id"],)
-                    )
-                    await db.commit()
-
-                await _broadcast({
-                    "type": "image_started",
-                    "task_id": task_id,
-                    "image_id": image_id,
-                })
+                _processing_images.add(image_id)
 
                 try:
+                    async with get_db() as db:
+                        await db.execute(
+                            "UPDATE task_items SET status = 'running', started_at = datetime('now') WHERE id = ?",
+                            (item["id"],)
+                        )
+                        await db.commit()
+
+                    await _broadcast({
+                        "type": "image_started",
+                        "task_id": task_id,
+                        "image_id": image_id,
+                    })
+
                     organized_path = item["organized_path"]
 
                     for step in steps:
@@ -118,26 +141,18 @@ async def run_task(task_id: int):
                                 await asyncio.to_thread(orient_image, full_path)
 
                         elif step in ("auto_orient", "deskew", "restore_color", "remove_dust"):
-                            if organized_path:
-                                full_path = os.path.join(settings.output_dir, organized_path)
-                            else:
-                                full_path = os.path.join(settings.source_dir, item["source_path"])
+                            if not organized_path:
+                                organized_path = await _auto_organize(item, image_id)
+                            full_path = os.path.join(settings.output_dir, organized_path)
                             step_fn = {"auto_orient": auto_orient_image, "deskew": deskew_image, "restore_color": restore_color, "remove_dust": remove_dust}[step]
                             await asyncio.to_thread(step_fn, full_path)
 
                         elif step == "enhance":
                             from app.services.enhancer import enhance_image
-                            source_for_enhance = None
-                            if organized_path:
-                                source_for_enhance = os.path.join(settings.output_dir, organized_path)
-                            else:
-                                source_for_enhance = os.path.join(settings.source_dir, item["source_path"])
-
-                            if organized_path:
-                                enhanced_rel = organized_path.replace("organized/", "enhanced/", 1)
-                            else:
-                                scan_id = item["scan_id"] or os.path.splitext(item["source_path"])[0]
-                                enhanced_rel = f"enhanced/unsorted/{scan_id}.jpg"
+                            if not organized_path:
+                                organized_path = await _auto_organize(item, image_id)
+                            source_for_enhance = os.path.join(settings.output_dir, organized_path)
+                            enhanced_rel = organized_path.replace("organized/", "enhanced/", 1)
 
                             await asyncio.to_thread(
                                 enhance_image, source_for_enhance, enhanced_rel
@@ -155,6 +170,13 @@ async def run_task(task_id: int):
                             "image_id": image_id,
                             "step": step,
                         })
+
+                        async with get_db() as db:
+                            await db.execute(
+                                "INSERT INTO image_history (image_id, step) VALUES (?, ?)",
+                                (image_id, step)
+                            )
+                            await db.commit()
 
                     thumb = get_thumbnail_path(image_id)
                     if os.path.exists(thumb):
@@ -177,6 +199,9 @@ async def run_task(task_id: int):
                         )
                         await db.commit()
                     failed += 1
+
+                finally:
+                    _processing_images.discard(image_id)
 
                 async with get_db() as db:
                     await db.execute(

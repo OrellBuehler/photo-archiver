@@ -69,6 +69,13 @@ class TaskItemOut(BaseModel):
     completed_at: str | None
 
 
+class ImageHistoryOut(BaseModel):
+    id: int
+    image_id: int
+    step: str
+    created_at: str | None
+
+
 class ProgressMessage(BaseModel):
     type: str
     task_id: int

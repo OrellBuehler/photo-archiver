@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { Image } from '$lib/types';
-  import { imageFileUrl, updateImage, rotateImage, createBatchTask, getTask, getImage } from '$lib/api';
+  import { imageFileUrl, updateImage, rotateImage, createBatchTask, getTask, getImage, getImageHistory } from '$lib/api';
+  import type { ImageHistory } from '$lib/types';
+  import { onMount } from 'svelte';
   import BeforeAfter from '$lib/components/BeforeAfter.svelte';
   import { toast } from 'svelte-sonner';
 
@@ -20,6 +22,13 @@
   let processing = $state(false);
   let cacheBust = $state(Date.now());
   let busy = $derived(rotating || processing);
+  let history = $state<ImageHistory[]>([]);
+
+  async function loadHistory() {
+    try { history = await getImageHistory(image.id); } catch {}
+  }
+
+  onMount(() => { loadHistory(); });
 
   async function handleRotate(direction: 'left' | 'right') {
     rotating = true;
@@ -28,8 +37,10 @@
       image = await rotateImage(image.id, direction);
       cacheBust = Date.now();
       toast.success('Rotated');
+      loadHistory();
     } catch (e) {
-      toast.error(`Rotation failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      const msg = e instanceof Error ? e.message : 'unknown error';
+      toast.error(msg.includes('409') ? 'Image is currently being processed' : `Rotation failed: ${msg}`);
     } finally {
       rotating = false;
     }
@@ -45,8 +56,10 @@
       image = await getImage(image.id);
       cacheBust = Date.now();
       toast.success(`${label} complete`);
+      loadHistory();
     } catch (e) {
-      toast.error(`${label} failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      const msg = e instanceof Error ? e.message : 'unknown error';
+      toast.error(msg.includes('409') ? 'Image is currently being processed' : `${label} failed: ${msg}`);
     } finally {
       processing = false;
     }
@@ -241,6 +254,22 @@
             </button>
           </div>
         </form>
+      {/if}
+    </div>
+
+    <div class="rounded-lg border p-4 space-y-3">
+      <h3 class="font-medium text-sm">History</h3>
+      {#if history.length === 0}
+        <p class="text-xs text-muted-foreground">No processing history</p>
+      {:else}
+        <div class="space-y-1.5">
+          {#each history as entry}
+            <div class="flex justify-between text-xs">
+              <span>{entry.step.replace(/_/g, ' ')}</span>
+              <span class="text-muted-foreground">{entry.created_at ? new Date(entry.created_at + 'Z').toLocaleString() : ''}</span>
+            </div>
+          {/each}
+        </div>
       {/if}
     </div>
 

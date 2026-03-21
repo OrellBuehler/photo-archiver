@@ -1,4 +1,4 @@
-import type { ImageListResponse, ImageStats, Image, Task, AppSettings, DuplicateGroup } from './types';
+import type { ImageListResponse, ImageStats, Image, ImageHistory, Task, AppSettings, DuplicateGroup } from './types';
 
 const BASE = '/api';
 
@@ -50,6 +50,10 @@ export function imageFileUrl(id: number, variant: string = 'source'): string {
 
 export async function rotateImage(id: number, direction: 'left' | 'right'): Promise<Image> {
   return fetchJSON<Image>(`${BASE}/images/${id}/rotate?direction=${direction}`, { method: 'POST' });
+}
+
+export async function getImageHistory(id: number): Promise<ImageHistory[]> {
+  return fetchJSON<ImageHistory[]>(`${BASE}/images/${id}/history`);
 }
 
 export async function createBatchTask(imageIds: number[] | 'all', steps: string[]): Promise<Task> {

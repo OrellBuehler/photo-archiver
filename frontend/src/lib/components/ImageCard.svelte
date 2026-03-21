@@ -2,9 +2,10 @@
   import type { Image } from '$lib/types';
   import { thumbnailUrl } from '$lib/api';
 
-  let { image, selected = false, onselect, onclick }: {
+  let { image, selected = false, processing = false, onselect, onclick }: {
     image: Image;
     selected?: boolean;
+    processing?: boolean;
     onselect?: (id: number, checked: boolean) => void;
     onclick?: (image: Image) => void;
   } = $props();
@@ -33,7 +34,7 @@
     </div>
   {/if}
 
-  <div class="aspect-[4/3] bg-muted">
+  <div class="relative aspect-[4/3] bg-muted">
     {#if !loaded}
       <div class="h-full w-full animate-pulse bg-muted"></div>
     {/if}
@@ -44,6 +45,11 @@
       class:opacity-0={!loaded}
       onload={() => loaded = true}
     />
+    {#if processing}
+      <div class="absolute inset-0 flex items-center justify-center bg-black/30">
+        <div class="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+      </div>
+    {/if}
   </div>
 
   <div class="p-2">

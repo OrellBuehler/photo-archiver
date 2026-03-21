@@ -4,9 +4,11 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from app.db import get_db
 from app.config import settings
-from app.models import ImageOut, ImageUpdate, ImageListResponse, ImageStats, BulkDeleteRequest, BulkUpdateRequest
+from app.models import ImageOut, ImageUpdate, ImageListResponse, ImageStats, ImageHistoryOut, BulkDeleteRequest, BulkUpdateRequest
 from app.utils.thumbnails import generate_thumbnail, get_thumbnail_path
 from app.services.rotator import rotate_image
+from app.services.organizer import organize_image
+from app.services.pipeline import is_image_processing
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
@@ -119,6 +121,9 @@ async def get_thumbnail(image_id: int):
 
 @router.post("/{image_id}/rotate", response_model=ImageOut)
 async def rotate_image_endpoint(image_id: int, direction: str = Query(..., pattern="^(left|right)$")):
+    if is_image_processing(image_id):
+        raise HTTPException(409, "Image is currently being processed")
+
     async with get_db() as db:
         cursor = await db.execute("SELECT * FROM images WHERE id = ?", (image_id,))
         row = await cursor.fetchone()
@@ -126,10 +131,19 @@ async def rotate_image_endpoint(image_id: int, direction: str = Query(..., patte
             raise HTTPException(404, "Image not found")
         row = dict(row)
 
-    if row["organized_path"]:
-        file_path = os.path.join(settings.output_dir, row["organized_path"])
-    else:
-        file_path = os.path.join(settings.source_dir, row["source_path"])
+    if not row["organized_path"]:
+        organized_path = await asyncio.to_thread(
+            organize_image, row["source_path"], row["scan_id"], row["year"], row["month"]
+        )
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE images SET organized_path = ?, status = 'organized', updated_at = datetime('now') WHERE id = ?",
+                (organized_path, image_id)
+            )
+            await db.commit()
+        row["organized_path"] = organized_path
+
+    file_path = os.path.join(settings.output_dir, row["organized_path"])
 
     if not os.path.exists(file_path):
         raise HTTPException(404, "File not found")
@@ -150,10 +164,25 @@ async def rotate_image_endpoint(image_id: int, direction: str = Query(..., patte
             "UPDATE images SET width = ?, height = ?, updated_at = datetime('now') WHERE id = ?",
             (w, h, image_id)
         )
+        await db.execute(
+            "INSERT INTO image_history (image_id, step) VALUES (?, ?)",
+            (image_id, f"rotate_{direction}")
+        )
         await db.commit()
         cursor = await db.execute("SELECT * FROM images WHERE id = ?", (image_id,))
         row = await cursor.fetchone()
         return ImageOut(**dict(row))
+
+
+@router.get("/{image_id}/history", response_model=list[ImageHistoryOut])
+async def get_image_history(image_id: int):
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM image_history WHERE image_id = ? ORDER BY created_at",
+            (image_id,)
+        )
+        rows = await cursor.fetchall()
+        return [ImageHistoryOut(**dict(r)) for r in rows]
 
 
 @router.patch("/{image_id}", response_model=ImageOut)

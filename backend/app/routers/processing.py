@@ -3,7 +3,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from app.db import get_db
 from app.models import TaskOut, TaskCreate, TaskItemOut
-from app.services.pipeline import run_task
+from app.services.pipeline import run_task, is_image_processing
 
 router = APIRouter(prefix="/api", tags=["processing"])
 
@@ -20,6 +20,10 @@ async def create_batch_task(req: TaskCreate):
 
         if not image_ids:
             raise HTTPException(400, "No images specified")
+
+        busy = [id for id in image_ids if is_image_processing(id)]
+        if busy:
+            raise HTTPException(409, f"Images already processing: {busy}")
 
         cursor = await db.execute(
             "INSERT INTO tasks (steps, total_images) VALUES (?, ?)",
@@ -50,6 +54,9 @@ async def create_single_task(image_id: int, req: TaskCreate):
         cursor = await db.execute("SELECT id FROM images WHERE id = ?", (image_id,))
         if not await cursor.fetchone():
             raise HTTPException(404, "Image not found")
+
+        if is_image_processing(image_id):
+            raise HTTPException(409, f"Image {image_id} is already processing")
 
         cursor = await db.execute(
             "INSERT INTO tasks (steps, total_images) VALUES (?, 1)",

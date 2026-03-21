@@ -55,6 +55,13 @@ export interface DuplicateGroup {
   distance: number;
 }
 
+export interface ImageHistory {
+  id: number;
+  image_id: number;
+  step: string;
+  created_at: string | null;
+}
+
 export interface ProgressMessage {
   type: string;
   task_id: number;

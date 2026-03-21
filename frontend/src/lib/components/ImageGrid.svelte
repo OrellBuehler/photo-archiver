@@ -2,9 +2,10 @@
   import type { Image } from '$lib/types';
   import ImageCard from './ImageCard.svelte';
 
-  let { images, selectedIds = new Set(), onselect, onclick }: {
+  let { images, selectedIds = new Set(), processingIds = new Set(), onselect, onclick }: {
     images: Image[];
     selectedIds?: Set<number>;
+    processingIds?: Set<number>;
     onselect?: (id: number, checked: boolean) => void;
     onclick?: (image: Image) => void;
   } = $props();
@@ -20,6 +21,7 @@
       <ImageCard
         {image}
         selected={selectedIds.has(image.id)}
+        processing={processingIds.has(image.id)}
         {onselect}
         {onclick}
       />
