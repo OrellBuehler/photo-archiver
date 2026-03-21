@@ -37,14 +37,14 @@
     if (value === null) sp.delete(key);
     else sp.set(key, value);
     if (key !== 'page') sp.delete('page');
-    goto(`?${sp}`, { replaceState: true, keepFocus: true });
+    goto(`?${sp}`, { keepFocus: true });
   }
 
   function setPage(p: number) {
     const sp = new URLSearchParams($page.url.searchParams);
     if (p <= 1) sp.delete('page');
     else sp.set('page', String(p));
-    goto(`?${sp}`, { replaceState: true, keepFocus: true });
+    goto(`?${sp}`, { keepFocus: true });
   }
 
   async function loadImages() {
@@ -77,7 +77,7 @@
   }
 
   function handleClick(image: Image) {
-    window.location.href = `/image/${image.id}`;
+    goto(`/image/${image.id}`);
   }
 
   let unsubscribe: (() => void) | undefined;
@@ -163,7 +163,7 @@
   {pageImageIds}
   onTaskCreated={(id) => {
     selectedIds = new Set();
-    window.location.href = '/processing';
+    goto('/processing');
   }}
   onSelectionChange={(ids) => { selectedIds = ids; }}
   onRefresh={refresh}
