@@ -55,7 +55,11 @@
         <p class="text-sm text-muted-foreground">Detects and removes small dust particles and scratches from scanned images using adaptive thresholding and inpainting.</p>
       </div>
       <div>
-        <h3 class="text-sm font-medium">7. Enhance</h3>
+        <h3 class="text-sm font-medium">7. Remove Lines</h3>
+        <p class="text-sm text-muted-foreground">Detects and removes thin horizontal lines caused by scanner imperfections (debris on glass, sensor issues). Uses morphological line detection and inpainting.</p>
+      </div>
+      <div>
+        <h3 class="text-sm font-medium">8. Enhance</h3>
         <p class="text-sm text-muted-foreground">AI-powered upscaling using RealESRGAN (4x resolution) with face restoration via GFPGAN. Creates a separate enhanced copy in the <code class="text-xs bg-muted rounded px-1">enhanced/</code> folder. This is the most resource-intensive step and benefits from a CUDA GPU.</p>
       </div>
     </div>

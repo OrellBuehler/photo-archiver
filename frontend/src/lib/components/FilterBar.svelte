@@ -9,6 +9,7 @@
     deskew: 'Deskew',
     restore_color: 'Restore Color',
     remove_dust: 'Remove Dust',
+    remove_lines: 'Remove Lines',
     enhance: 'Enhance',
   };
 

@@ -8,6 +8,7 @@ from app.services.orienter import orient_image
 from app.services.deskewer import deskew_image
 from app.services.color_restorer import restore_color
 from app.services.dust_remover import remove_dust
+from app.services.line_remover import remove_lines
 from app.services.cropper import crop_image
 from app.services.auto_orienter import auto_orient_image
 from app.utils.thumbnails import get_thumbnail_path
@@ -152,11 +153,11 @@ async def run_task(task_id: int):
                                 )
                                 await db.commit()
 
-                        elif step in ("crop", "auto_orient", "deskew", "restore_color", "remove_dust"):
+                        elif step in ("crop", "auto_orient", "deskew", "restore_color", "remove_dust", "remove_lines"):
                             if not organized_path:
                                 organized_path = await auto_organize(item, image_id)
                             full_path = os.path.join(settings.output_dir, organized_path)
-                            step_fn = {"crop": crop_image, "auto_orient": auto_orient_image, "deskew": deskew_image, "restore_color": restore_color, "remove_dust": remove_dust}[step]
+                            step_fn = {"crop": crop_image, "auto_orient": auto_orient_image, "deskew": deskew_image, "restore_color": restore_color, "remove_dust": remove_dust, "remove_lines": remove_lines}[step]
                             await asyncio.to_thread(step_fn, full_path)
                             async with get_db() as db:
                                 await db.execute(

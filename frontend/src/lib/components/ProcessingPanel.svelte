@@ -10,7 +10,7 @@
     onRefresh?: () => void;
   } = $props();
 
-  let steps = $state({ organize: true, crop: false, auto_orient: false, deskew: false, restore_color: false, remove_dust: false, enhance: false });
+  let steps = $state({ organize: true, crop: false, auto_orient: false, deskew: false, restore_color: false, remove_dust: false, remove_lines: false, enhance: false });
   let processing = $state(false);
   let deleting = $state(false);
   let saving = $state(false);
@@ -120,6 +120,10 @@
         <label class="flex items-center gap-1.5 text-sm">
           <input type="checkbox" bind:checked={steps.remove_dust} class="rounded" />
           Remove Dust
+        </label>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input type="checkbox" bind:checked={steps.remove_lines} class="rounded" />
+          Remove Lines
         </label>
         <label class="flex items-center gap-1.5 text-sm">
           <input type="checkbox" bind:checked={steps.enhance} class="rounded" />

@@ -124,6 +124,7 @@
     { key: 'deskew', label: 'Deskew' },
     { key: 'restore_color', label: 'Restore Color' },
     { key: 'remove_dust', label: 'Remove Dust' },
+    { key: 'remove_lines', label: 'Remove Lines' },
     { key: 'enhance', label: 'Enhance' },
   ];
 </script>
