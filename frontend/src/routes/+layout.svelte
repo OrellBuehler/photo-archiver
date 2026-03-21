@@ -4,8 +4,8 @@
   let { children } = $props();
 </script>
 
-<div class="min-h-screen flex flex-col">
-  <header class="border-b bg-background">
+<div class="h-screen flex flex-col overflow-hidden">
+  <header class="shrink-0 border-b bg-background">
     <div class="container mx-auto flex items-center justify-between px-4 py-3">
       <a href="/" class="text-xl font-bold">Photo Archiver</a>
       <nav class="flex gap-4">
@@ -16,7 +16,7 @@
       </nav>
     </div>
   </header>
-  <main class="flex-1 container mx-auto px-4 py-6">
+  <main class="flex-1 min-h-0 container mx-auto px-4">
     {@render children()}
   </main>
 </div>

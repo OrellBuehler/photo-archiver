@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Image } from '$lib/types';
-  import { imageFileUrl, updateImage, rotateImage } from '$lib/api';
+  import { imageFileUrl, updateImage, rotateImage, createBatchTask } from '$lib/api';
   import BeforeAfter from '$lib/components/BeforeAfter.svelte';
 
   let { image: initialImage }: { image: Image } = $props();
@@ -16,6 +16,7 @@
   let activeVariant = $state<string>('source');
   let showCompare = $state(false);
   let rotating = $state(false);
+  let processing = $state(false);
   let cacheBust = $state(Date.now());
 
   async function handleRotate(direction: 'left' | 'right') {
@@ -25,6 +26,15 @@
       cacheBust = Date.now();
     } finally {
       rotating = false;
+    }
+  }
+
+  async function handleProcess(steps: string[]) {
+    processing = true;
+    try {
+      await createBatchTask([image.id], steps);
+    } finally {
+      processing = false;
     }
   }
 
@@ -62,13 +72,23 @@
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
+
+  const processSteps = [
+    { key: 'organize', label: 'Organize' },
+    { key: 'orient', label: 'Orient' },
+    { key: 'auto_orient', label: 'Auto-Orient' },
+    { key: 'deskew', label: 'Deskew' },
+    { key: 'restore_color', label: 'Restore Color' },
+    { key: 'remove_dust', label: 'Remove Dust' },
+    { key: 'enhance', label: 'Enhance' },
+  ];
 </script>
 
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<div class="flex flex-col lg:flex-row gap-6 h-full py-4">
   <!-- Image viewer -->
-  <div class="lg:col-span-2">
+  <div class="flex-1 min-w-0 flex flex-col min-h-0">
     {#if variants().length > 1}
-      <div class="flex gap-1 mb-3">
+      <div class="shrink-0 flex gap-1 mb-3">
         {#each variants() as v}
           <button
             class="rounded-md px-3 py-1.5 text-sm transition-colors {activeVariant === v.key && !showCompare ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'}"
@@ -84,22 +104,24 @@
       </div>
     {/if}
     {#if showCompare && image.enhanced_path}
-      <BeforeAfter
-        beforeSrc={imageFileUrl(image.id, 'source')}
-        afterSrc={imageFileUrl(image.id, 'enhanced')}
-        beforeLabel="Source"
-        afterLabel="Enhanced"
-      />
+      <div class="flex-1 min-h-0">
+        <BeforeAfter
+          beforeSrc={imageFileUrl(image.id, 'source')}
+          afterSrc={imageFileUrl(image.id, 'enhanced')}
+          beforeLabel="Source"
+          afterLabel="Enhanced"
+        />
+      </div>
     {:else}
-      <div class="rounded-lg border overflow-hidden bg-muted">
+      <div class="flex-1 min-h-0 flex items-center justify-center rounded-lg border overflow-hidden bg-muted">
         <img
           src="{imageFileUrl(image.id, activeVariant)}&t={cacheBust}"
           alt={image.title || image.filename}
-          class="w-full h-auto"
+          class="max-w-full max-h-full object-contain"
         />
       </div>
     {/if}
-    <div class="flex gap-2 mt-3">
+    <div class="shrink-0 flex gap-2 mt-3">
       <button
         class="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary transition-colors disabled:opacity-50"
         disabled={rotating}
@@ -113,11 +135,24 @@
     </div>
   </div>
 
-  <!-- Metadata panel -->
-  <div class="space-y-4">
+  <!-- Sidebar -->
+  <div class="lg:w-80 shrink-0 overflow-y-auto space-y-4">
     <div>
       <h2 class="text-lg font-semibold">{image.title || image.scan_id || image.filename}</h2>
       <p class="text-sm text-muted-foreground">{image.source_path}</p>
+    </div>
+
+    <div class="rounded-lg border p-4 space-y-3">
+      <h3 class="font-medium text-sm">Processing</h3>
+      <div class="flex flex-wrap gap-1.5">
+        {#each processSteps as step}
+          <button
+            class="rounded-md border px-2.5 py-1 text-xs hover:bg-secondary transition-colors disabled:opacity-50"
+            disabled={processing}
+            onclick={() => handleProcess([step.key])}
+          >{step.label}</button>
+        {/each}
+      </div>
     </div>
 
     <div class="rounded-lg border p-4 space-y-3">
