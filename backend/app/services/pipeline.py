@@ -145,6 +145,12 @@ async def run_task(task_id: int):
                                 organized_path = await auto_organize(item, image_id)
                             full_path = os.path.join(settings.output_dir, organized_path)
                             await asyncio.to_thread(orient_image, full_path)
+                            async with get_db() as db:
+                                await db.execute(
+                                    "UPDATE images SET updated_at = datetime('now') WHERE id = ?",
+                                    (image_id,)
+                                )
+                                await db.commit()
 
                         elif step in ("crop", "auto_orient", "deskew", "restore_color", "remove_dust"):
                             if not organized_path:
