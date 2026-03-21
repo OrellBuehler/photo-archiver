@@ -16,7 +16,7 @@
   let editMonth = $state(image.month ?? undefined);
   let editTitle = $state(image.title ?? '');
 
-  let activeVariant = $state<string>('source');
+  let activeVariant = $state<string>(initialImage.enhanced_path ? 'enhanced' : initialImage.organized_path ? 'organized' : 'source');
   let showCompare = $state(false);
   let rotating = $state(false);
   let processing = $state(false);
@@ -28,6 +28,11 @@
     try { history = await getImageHistory(image.id); } catch {}
   }
 
+  function switchToBestVariant() {
+    if (image.enhanced_path) activeVariant = 'enhanced';
+    else if (image.organized_path) activeVariant = 'organized';
+  }
+
   onMount(() => { loadHistory(); });
 
   async function handleRotate(direction: 'left' | 'right') {
@@ -36,6 +41,7 @@
     try {
       image = await rotateImage(image.id, direction);
       cacheBust = Date.now();
+      switchToBestVariant();
       toast.success('Rotated');
       loadHistory();
     } catch (e) {
@@ -55,6 +61,7 @@
       await pollTask(task.id);
       image = await getImage(image.id);
       cacheBust = Date.now();
+      switchToBestVariant();
       toast.success(`${label} complete`);
       loadHistory();
     } catch (e) {
