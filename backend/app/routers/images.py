@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from app.db import get_db
 from app.config import settings
-from app.models import ImageOut, ImageUpdate, ImageListResponse, ImageStats, ImageHistoryOut, BulkDeleteRequest, BulkUpdateRequest
+from app.models import ImageOut, ImageUpdate, ImageListResponse, ImageStats, ImageHistoryOut, BulkDeleteRequest, BulkUpdateRequest, FilterCounts, FilterCountItem
 from app.utils.thumbnails import generate_thumbnail, get_thumbnail_path
 from app.services.rotator import rotate_image
 from app.services.pipeline import is_image_processing, auto_organize
@@ -12,37 +12,46 @@ from app.services.pipeline import is_image_processing, auto_organize
 router = APIRouter(prefix="/api/images", tags=["images"])
 
 
+def build_where(*, year=None, month=None, status=None, step=None, year_unknown=None):
+    conditions = []
+    params = []
+    if year is not None:
+        conditions.append("i.year = ?")
+        params.append(year)
+    if month is not None:
+        conditions.append("i.month = ?")
+        params.append(month)
+    if status is not None:
+        conditions.append("i.status = ?")
+        params.append(status)
+    if step is not None:
+        conditions.append("EXISTS (SELECT 1 FROM image_history h WHERE h.image_id = i.id AND h.step = ?)")
+        params.append(step)
+    if year_unknown:
+        conditions.append("i.year IS NULL")
+    return (" AND ".join(conditions), params) if conditions else ("1=1", [])
+
+
 @router.get("", response_model=ImageListResponse)
 async def list_images(
     year: int | None = None,
     month: int | None = None,
     status: str | None = None,
+    step: str | None = None,
+    year_unknown: bool | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
 ):
     async with get_db() as db:
-        conditions = []
-        params = []
+        where, params = build_where(year=year, month=month, status=status, step=step, year_unknown=year_unknown)
 
-        if year is not None:
-            conditions.append("year = ?")
-            params.append(year)
-        if month is not None:
-            conditions.append("month = ?")
-            params.append(month)
-        if status is not None:
-            conditions.append("status = ?")
-            params.append(status)
-
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        cursor = await db.execute(f"SELECT COUNT(*) FROM images {where}", params)
+        cursor = await db.execute(f"SELECT COUNT(*) FROM images i WHERE {where}", params)
         row = await cursor.fetchone()
         total = row[0]
 
         offset = (page - 1) * per_page
         cursor = await db.execute(
-            f"SELECT * FROM images {where} ORDER BY year, month, scan_id LIMIT ? OFFSET ?",
+            f"SELECT * FROM images i WHERE {where} ORDER BY i.year, i.month, i.scan_id LIMIT ? OFFSET ?",
             params + [per_page, offset]
         )
         rows = await cursor.fetchall()
@@ -51,14 +60,48 @@ async def list_images(
         return ImageListResponse(images=images, total=total, page=page, per_page=per_page)
 
 
-@router.get("/stats", response_model=list[ImageStats])
-async def image_stats():
+@router.get("/stats", response_model=FilterCounts)
+async def image_stats(
+    year: int | None = None,
+    month: int | None = None,
+    status: str | None = None,
+    step: str | None = None,
+    year_unknown: bool | None = None,
+):
     async with get_db() as db:
+        year_where, year_params = build_where(month=month, status=status, step=step)
         cursor = await db.execute(
-            "SELECT year, status, COUNT(*) as count FROM images GROUP BY year, status ORDER BY year"
+            f"SELECT i.year as value, COUNT(*) as count FROM images i WHERE {year_where} GROUP BY i.year ORDER BY i.year",
+            year_params
         )
-        rows = await cursor.fetchall()
-        return [ImageStats(**dict(r)) for r in rows]
+        years = [FilterCountItem(**dict(r)) for r in await cursor.fetchall()]
+
+        month_where, month_params = build_where(year=year, status=status, step=step, year_unknown=year_unknown)
+        cursor = await db.execute(
+            f"SELECT i.month as value, COUNT(*) as count FROM images i WHERE {month_where} GROUP BY i.month ORDER BY i.month",
+            month_params
+        )
+        months = [FilterCountItem(**dict(r)) for r in await cursor.fetchall()]
+
+        status_where, status_params = build_where(year=year, month=month, step=step, year_unknown=year_unknown)
+        cursor = await db.execute(
+            f"SELECT i.status as value, COUNT(*) as count FROM images i WHERE {status_where} GROUP BY i.status ORDER BY i.status",
+            status_params
+        )
+        statuses = [FilterCountItem(**dict(r)) for r in await cursor.fetchall()]
+
+        step_where, step_params = build_where(year=year, month=month, status=status, year_unknown=year_unknown)
+        cursor = await db.execute(
+            f"SELECT h.step as value, COUNT(DISTINCT h.image_id) as count FROM image_history h JOIN images i ON i.id = h.image_id WHERE {step_where} GROUP BY h.step ORDER BY h.step",
+            step_params
+        )
+        steps = [FilterCountItem(**dict(r)) for r in await cursor.fetchall()]
+
+        total_where, total_params = build_where(year=year, month=month, status=status, step=step, year_unknown=year_unknown)
+        cursor = await db.execute(f"SELECT COUNT(*) FROM images i WHERE {total_where}", total_params)
+        total = (await cursor.fetchone())[0]
+
+        return FilterCounts(years=years, months=months, statuses=statuses, steps=steps, total=total)
 
 
 @router.get("/{image_id}", response_model=ImageOut)

@@ -40,6 +40,19 @@ class ImageStats(BaseModel):
     count: int
 
 
+class FilterCountItem(BaseModel):
+    value: str | int | None
+    count: int
+
+
+class FilterCounts(BaseModel):
+    years: list[FilterCountItem]
+    months: list[FilterCountItem]
+    statuses: list[FilterCountItem]
+    steps: list[FilterCountItem]
+    total: int
+
+
 class TaskOut(BaseModel):
     id: int
     status: str
