@@ -10,6 +10,7 @@
     { href: '/processing', label: 'Processing', match: (p: string) => p.startsWith('/processing') },
     { href: '/duplicates', label: 'Duplicates', match: (p: string) => p.startsWith('/duplicates') },
     { href: '/settings', label: 'Settings', match: (p: string) => p.startsWith('/settings') },
+    { href: '/help', label: 'Help', match: (p: string) => p.startsWith('/help') },
   ];
 </script>
 
