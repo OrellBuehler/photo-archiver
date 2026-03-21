@@ -1,33 +1,58 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import { getImages, getImageStats } from '$lib/api';
   import { subscribe } from '$lib/ws';
-  import type { Image, FilterCounts } from '$lib/types';
+  import type { Image, FilterCounts, FilterParams } from '$lib/types';
   import ImageGrid from '$lib/components/ImageGrid.svelte';
   import FilterBar from '$lib/components/FilterBar.svelte';
   import ProcessingPanel from '$lib/components/ProcessingPanel.svelte';
 
   let images = $state<Image[]>([]);
-  let stats = $state<FilterCounts | null>(null);
+  let counts = $state<FilterCounts | null>(null);
   let total = $state(0);
-  let page = $state(1);
   let perPage = 60;
   let loading = $state(true);
 
-  let selectedYear = $state<number | null>(null);
-  let selectedStatus = $state<string | null>(null);
   let selectedIds = $state(new Set<number>());
   let processingIds = $state(new Set<number>());
 
   let pageImageIds = $derived(images.map((img) => img.id));
 
+  let filters = $derived<FilterParams>({
+    year: $page.url.searchParams.has('year') ? Number($page.url.searchParams.get('year')) : null,
+    month: $page.url.searchParams.has('month') ? Number($page.url.searchParams.get('month')) : null,
+    status: $page.url.searchParams.get('status') ?? null,
+    step: $page.url.searchParams.get('step') ?? null,
+    year_unknown: $page.url.searchParams.has('year_unknown') ? true : null,
+  });
+
+  let currentPage = $derived(
+    $page.url.searchParams.has('page') ? Number($page.url.searchParams.get('page')) : 1
+  );
+
+  function setFilter(key: string, value: string | null) {
+    const sp = new URLSearchParams($page.url.searchParams);
+    if (value === null) sp.delete(key);
+    else sp.set(key, value);
+    if (key !== 'page') sp.delete('page');
+    goto(`?${sp}`, { replaceState: true, keepFocus: true });
+  }
+
+  function setPage(p: number) {
+    const sp = new URLSearchParams($page.url.searchParams);
+    if (p <= 1) sp.delete('page');
+    else sp.set('page', String(p));
+    goto(`?${sp}`, { replaceState: true, keepFocus: true });
+  }
+
   async function loadImages() {
     loading = true;
     try {
       const res = await getImages({
-        year: selectedYear,
-        status: selectedStatus,
-        page,
+        ...filters,
+        page: currentPage,
         per_page: perPage,
       });
       images = res.images;
@@ -38,18 +63,11 @@
   }
 
   async function loadStats() {
-    stats = await getImageStats();
+    counts = await getImageStats(filters);
   }
 
   async function refresh() {
     await Promise.all([loadImages(), loadStats()]);
-  }
-
-  function handleFilter(year: number | null, status: string | null) {
-    selectedYear = year;
-    selectedStatus = status;
-    page = 1;
-    loadImages();
   }
 
   function handleSelect(id: number, checked: boolean) {
@@ -65,8 +83,6 @@
   let unsubscribe: (() => void) | undefined;
 
   onMount(() => {
-    loadStats();
-    loadImages();
     unsubscribe = subscribe((msg) => {
       if (msg.type === 'image_started' && msg.image_id) {
         processingIds = new Set([...processingIds, msg.image_id]);
@@ -81,17 +97,22 @@
     return () => unsubscribe?.();
   });
 
+  $effect(() => {
+    void filters;
+    void currentPage;
+    loadImages();
+    loadStats();
+  });
+
   let totalPages = $derived(Math.ceil(total / perPage));
 </script>
 
 <div class="flex flex-col h-full">
   <div class="shrink-0">
     <FilterBar
-      {stats}
-      {selectedYear}
-      {selectedStatus}
-      {total}
-      onfilter={handleFilter}
+      {counts}
+      {filters}
+      onfilter={setFilter}
     />
   </div>
 
@@ -123,14 +144,14 @@
     <div class="shrink-0 flex items-center justify-center gap-2 py-3 border-t">
       <button
         class="rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
-        disabled={page <= 1}
-        onclick={() => { page--; loadImages(); }}
+        disabled={currentPage <= 1}
+        onclick={() => setPage(currentPage - 1)}
       >Previous</button>
-      <span class="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
+      <span class="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
       <button
         class="rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
-        disabled={page >= totalPages}
-        onclick={() => { page++; loadImages(); }}
+        disabled={currentPage >= totalPages}
+        onclick={() => setPage(currentPage + 1)}
       >Next</button>
     </div>
   {/if}
