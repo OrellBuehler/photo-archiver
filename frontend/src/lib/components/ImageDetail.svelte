@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Image } from '$lib/types';
-  import { imageFileUrl, updateImage, rotateImage, createBatchTask, getTask } from '$lib/api';
+  import { imageFileUrl, updateImage, rotateImage, createBatchTask, getTask, getImage } from '$lib/api';
   import BeforeAfter from '$lib/components/BeforeAfter.svelte';
   import { toast } from 'svelte-sonner';
 
@@ -42,6 +42,8 @@
     try {
       const task = await createBatchTask([image.id], steps);
       await pollTask(task.id);
+      image = await getImage(image.id);
+      cacheBust = Date.now();
       toast.success(`${label} complete`);
     } catch (e) {
       toast.error(`${label} failed: ${e instanceof Error ? e.message : 'unknown error'}`);
@@ -97,8 +99,7 @@
 
   const processSteps = [
     { key: 'organize', label: 'Organize' },
-    { key: 'orient', label: 'Orient' },
-    { key: 'auto_orient', label: 'Auto-Orient' },
+    { key: 'auto_orient', label: 'Orient' },
     { key: 'deskew', label: 'Deskew' },
     { key: 'restore_color', label: 'Restore Color' },
     { key: 'remove_dust', label: 'Remove Dust' },

@@ -9,6 +9,7 @@ from app.services.deskewer import deskew_image
 from app.services.color_restorer import restore_color
 from app.services.dust_remover import remove_dust
 from app.services.auto_orienter import auto_orient_image
+from app.utils.thumbnails import get_thumbnail_path
 from app.routers.ws import manager
 
 
@@ -154,6 +155,10 @@ async def run_task(task_id: int):
                             "image_id": image_id,
                             "step": step,
                         })
+
+                    thumb = get_thumbnail_path(image_id)
+                    if os.path.exists(thumb):
+                        os.remove(thumb)
 
                     async with get_db() as db:
                         await db.execute(
