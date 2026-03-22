@@ -11,6 +11,8 @@
     remove_dust: 'Remove Dust',
     remove_lines: 'Remove Lines',
     enhance: 'Enhance',
+    rotate_left: 'Rotate Left',
+    rotate_right: 'Rotate Right',
   };
 
   let { counts, filters, onfilter }: {
@@ -48,10 +50,10 @@
   const pillInactive = `${pill} text-muted-foreground hover:bg-secondary hover:text-foreground`;
 </script>
 
-<div class="flex flex-col gap-2 py-3 border-b">
+<div class="flex flex-col gap-1.5 py-2 border-b">
   <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
     <span class="text-sm font-medium text-foreground w-14 shrink-0">Year</span>
-    <div class="flex flex-wrap gap-1">
+    <div class="flex gap-1 overflow-x-auto" style="mask-image: linear-gradient(to right, transparent 0%, black 2%, black 95%, transparent 100%); scrollbar-width: none; -ms-overflow-style: none;">
       <button
         class={!filters.year && !filters.year_unknown ? pillActive : pillInactive}
         onclick={() => { onfilter('year', null); onfilter('year_unknown', null); }}

@@ -59,7 +59,7 @@
 </script>
 
 <div class="py-4 space-y-8 h-full overflow-y-auto">
-  <h1 class="text-2xl font-bold">Processing</h1>
+  <h1 class="text-xl font-bold">Processing</h1>
 
   <div class="rounded-lg border p-4 space-y-3">
     <h2 class="font-medium">Process All Images</h2>
@@ -127,8 +127,10 @@
       <p class="p-4 text-sm text-muted-foreground">No tasks yet</p>
     {:else}
       <div class="divide-y">
-        {#each tasks as task}
-          <div class="p-4 flex items-center gap-4">
+        {#each tasks as task, i}
+          <div class="p-4 flex items-center gap-4
+            {task.status === 'failed' ? 'border-l-2 border-l-red-300' : task.status === 'cancelled' ? 'border-l-2 border-l-yellow-300' : ''}
+            {task.status === 'completed' && i >= 5 ? 'opacity-60' : ''}">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-medium">Task #{task.id}</span>

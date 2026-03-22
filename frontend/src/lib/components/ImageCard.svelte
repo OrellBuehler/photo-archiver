@@ -52,13 +52,10 @@
     {/if}
   </div>
 
-  <div class="px-0.5 pt-1.5 pb-1 opacity-80 group-hover:opacity-100 transition-opacity">
+  <div class="px-1 pt-1.5 pb-1">
     <p class="text-xs font-medium truncate">{image.title || image.scan_id || image.filename}</p>
-    <div class="flex items-center gap-1 mt-0.5">
-      {#if image.year}
-        <span class="text-[11px] text-muted-foreground">{image.year}{#if image.month}/{String(image.month).padStart(2, '0')}{/if}</span>
-      {/if}
-      <span class="ml-auto text-[11px] px-1.5 py-0.5 rounded-full {image.status === 'enhanced' ? 'bg-green-100 text-green-700' : image.status === 'organized' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}">{image.status}</span>
-    </div>
+    {#if image.year}
+      <p class="text-[11px] text-muted-foreground mt-0.5">{image.year}{#if image.month}/{String(image.month).padStart(2, '0')}{/if}</p>
+    {/if}
   </div>
 </div>

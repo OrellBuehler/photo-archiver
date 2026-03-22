@@ -164,7 +164,7 @@
         />
       </div>
     {:else}
-      <div class="flex-1 min-h-0 flex items-center justify-center rounded-lg border overflow-hidden bg-muted">
+      <div class="flex-1 min-h-0 flex items-center justify-center rounded-lg overflow-hidden bg-background">
         <img
           src="{imageFileUrl(image.id, activeVariant)}&t={cacheBust}"
           alt={image.title || image.filename}
@@ -172,7 +172,7 @@
         />
       </div>
     {/if}
-    <div class="shrink-0 flex gap-2 mt-3">
+    <div class="shrink-0 flex gap-2 mt-2">
       <button
         class="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary transition-colors disabled:opacity-50"
         disabled={busy}
@@ -243,7 +243,7 @@
           </div>
         </dl>
         <button
-          class="w-full rounded-md border px-3 py-1.5 text-sm hover:bg-secondary transition-colors"
+          class="inline-flex rounded-md border px-3 py-1.5 text-sm hover:bg-secondary transition-colors"
           onclick={startEdit}
         >Edit Metadata</button>
       {:else}

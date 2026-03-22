@@ -116,7 +116,7 @@
     />
   </div>
 
-  <div class="flex-1 min-h-0 overflow-y-auto py-4">
+  <div class="flex-1 min-h-0 overflow-y-auto py-3">
     {#if loading}
       <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 lg:gap-4">
         {#each Array(12) as _}
