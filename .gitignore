@@ -1,10 +1,21 @@
+# Local photo data (user-mounted drives / working dirs)
 archive-images/
 output/
-__pycache__/
-*.pyc
-.venv/
+
+# Node / frontend
 node_modules/
-.svelte-kit/
 dist/
+.DS_Store
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Databases
 *.db
+
+# Env
 .env
+
+# Editor / tooling
+.playwright-mcp/
