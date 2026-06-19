@@ -3,12 +3,14 @@
   import type { DockviewApi } from 'dockview-core'
   import Titlebar from './lib/Titlebar.svelte'
   import { createWorkspace } from './lib/workspace'
+  import { store } from './lib/store.svelte'
 
   let dockEl: HTMLDivElement
   let api: DockviewApi
 
   onMount(() => {
     api = createWorkspace(dockEl)
+    store.init()
     return () => api?.dispose()
   })
 </script>
