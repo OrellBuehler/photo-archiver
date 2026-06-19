@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod exif;
 mod imaging;
+mod ml;
 mod models;
 mod organize;
 mod pipeline;

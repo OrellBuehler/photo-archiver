@@ -1,0 +1,278 @@
+//! ONNX inference (orientation, line removal, enhancement) via `ort`.
+//!
+//! NOTE: the model URLs and tensor I/O assumptions below are implemented to the
+//! best documented behaviour of these exports but have NOT been validated at
+//! runtime in this environment. The first real run is the "validation spike":
+//! expect to adjust URLs / normalisation / output scaling per the actual models.
+//! Face restoration (GFPGAN/CodeFormer) additionally needs a face-detection
+//! stage and is intentionally not wired here yet.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+use anyhow::{anyhow, Result};
+use image::{imageops::FilterType, GrayImage, Luma, Rgb, RgbImage};
+use ort::execution_providers::CPUExecutionProvider;
+use ort::inputs;
+use ort::session::Session;
+use ort::value::Tensor;
+
+use crate::imaging::{open_rgb, save_rgb};
+
+// Community ONNX exports. Treat as defaults that may need updating after the
+// first validation run.
+const RESNET_URL: &str =
+    "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v1-7.onnx";
+const LAMA_URL: &str = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx";
+const ESRGAN_URL: &str =
+    "https://huggingface.co/Xenova/real-esrgan-x4/resolve/main/onnx/model.onnx";
+
+static SESSIONS: OnceLock<Mutex<HashMap<String, Session>>> = OnceLock::new();
+
+fn ensure_model(name: &str, url: &str, model_dir: &Path) -> Result<PathBuf> {
+    let path = model_dir.join(name);
+    if !path.exists() {
+        std::fs::create_dir_all(model_dir)?;
+        let resp = ureq::get(url)
+            .call()
+            .map_err(|e| anyhow!("failed to download model {name}: {e}"))?;
+        let mut reader = resp.into_reader();
+        let tmp = path.with_extension("part");
+        let mut file = std::fs::File::create(&tmp)?;
+        std::io::copy(&mut reader, &mut file)?;
+        std::fs::rename(&tmp, &path)?;
+    }
+    Ok(path)
+}
+
+/// Run `f` with a (lazily created, cached) session for the named model.
+fn with_session<F, R>(name: &str, url: &str, model_dir: &Path, f: F) -> Result<R>
+where
+    F: FnOnce(&mut Session) -> Result<R>,
+{
+    let map = SESSIONS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = map.lock().unwrap();
+    if !guard.contains_key(name) {
+        let path = ensure_model(name, url, model_dir)?;
+        let session = Session::builder()?
+            .with_execution_providers([CPUExecutionProvider::default().build()])?
+            .commit_from_file(&path)?;
+        guard.insert(name.to_string(), session);
+    }
+    f(guard.get_mut(name).unwrap())
+}
+
+fn rotate_k(img: &RgbImage, k: usize) -> RgbImage {
+    match k % 4 {
+        1 => image::imageops::rotate90(img),
+        2 => image::imageops::rotate180(img),
+        3 => image::imageops::rotate270(img),
+        _ => img.clone(),
+    }
+}
+
+// ─── Auto-orient (ResNet RotNet heuristic) ────────────────────────────────────
+
+const IMAGENET_MEAN: [f32; 3] = [0.485, 0.456, 0.406];
+const IMAGENET_STD: [f32; 3] = [0.229, 0.224, 0.225];
+
+fn preprocess_imagenet(img: &RgbImage) -> Vec<f32> {
+    let resized = image::imageops::resize(img, 224, 224, FilterType::Triangle);
+    let mut data = vec![0f32; 3 * 224 * 224];
+    let hw = 224 * 224;
+    for (i, p) in resized.pixels().enumerate() {
+        for c in 0..3 {
+            let v = p[c] as f32 / 255.0;
+            data[c * hw + i] = (v - IMAGENET_MEAN[c]) / IMAGENET_STD[c];
+        }
+    }
+    data
+}
+
+fn max_softmax(logits: &[f32]) -> f32 {
+    let max = logits.iter().cloned().fold(f32::MIN, f32::max);
+    let sum: f32 = logits.iter().map(|&l| (l - max).exp()).sum();
+    // softmax of the argmax == exp(0) / sum
+    1.0 / sum
+}
+
+/// Pick the rotation under which a generic classifier is most confident
+/// (assumed upright), and bake it in. Operates in place.
+pub fn orient(path: &Path, model_dir: &Path) -> Result<bool> {
+    let img = open_rgb(path)?;
+    let mut best = (0usize, f32::MIN);
+    for k in 0..4 {
+        let rotated = rotate_k(&img, k);
+        let data = preprocess_imagenet(&rotated);
+        let conf = with_session("resnet50.onnx", RESNET_URL, model_dir, |s| {
+            let t = Tensor::from_array((vec![1i64, 3, 224, 224], data))?;
+            let out = s.run(inputs![t])?;
+            let (_, logits) = out[0].try_extract_tensor::<f32>()?;
+            Ok(max_softmax(logits))
+        })?;
+        if conf > best.1 {
+            best = (k, conf);
+        }
+    }
+    if best.0 != 0 {
+        save_rgb(&rotate_k(&img, best.0), path)?;
+    }
+    Ok(true)
+}
+
+// ─── Scan-line removal (LaMa inpainting) ──────────────────────────────────────
+
+/// Per-row deviation detector (window 5, sensitivity 2.0), dilated vertically.
+fn detect_scan_lines(img: &RgbImage) -> GrayImage {
+    let gray = image::imageops::grayscale(img);
+    let (w, h) = gray.dimensions();
+    let half = 2i32; // window 5
+    let mut dev = vec![0f32; h as usize];
+    for y in half..(h as i32 - half) {
+        let mut acc = 0f64;
+        for x in 0..w {
+            let mut neigh: Vec<f32> = Vec::with_capacity(4);
+            for dy in -half..=half {
+                if dy == 0 {
+                    continue;
+                }
+                neigh.push(gray.get_pixel(x, (y + dy) as u32)[0] as f32);
+            }
+            neigh.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = (neigh[1] + neigh[2]) / 2.0;
+            acc += (gray.get_pixel(x, y as u32)[0] as f32 - median).abs() as f64;
+        }
+        dev[y as usize] = (acc / w as f64) as f32;
+    }
+    let inner: Vec<f32> = dev[half as usize..(h as usize - half as usize)].to_vec();
+    let n = inner.len().max(1) as f32;
+    let mean = inner.iter().sum::<f32>() / n;
+    let var = inner.iter().map(|d| (d - mean).powi(2)).sum::<f32>() / n;
+    let threshold = mean + 2.0 * var.sqrt();
+
+    let mut mask = GrayImage::new(w, h);
+    for y in 0..h {
+        if dev[y as usize] > threshold {
+            for x in 0..w {
+                mask.put_pixel(x, y, Luma([255]));
+            }
+        }
+    }
+    imageproc::morphology::dilate(&mask, imageproc::distance_transform::Norm::LInf, 1)
+}
+
+fn round_down_8(v: u32) -> u32 {
+    (v / 8 * 8).max(8)
+}
+
+pub fn remove_lines(path: &Path, model_dir: &Path) -> Result<bool> {
+    let img = open_rgb(path)?;
+    let (w, h) = img.dimensions();
+    let mask = detect_scan_lines(&img);
+    if mask.pixels().all(|p| p[0] == 0) {
+        return Ok(true);
+    }
+
+    // LaMa expects dims divisible by 8.
+    let (tw, th) = (round_down_8(w), round_down_8(h));
+    let img_r = image::imageops::resize(&img, tw, th, FilterType::Triangle);
+    let mask_r = image::imageops::resize(&mask, tw, th, FilterType::Nearest);
+
+    let hw = (tw * th) as usize;
+    let mut img_data = vec![0f32; 3 * hw];
+    for (i, p) in img_r.pixels().enumerate() {
+        for c in 0..3 {
+            img_data[c * hw + i] = p[c] as f32 / 255.0;
+        }
+    }
+    let mut mask_data = vec![0f32; hw];
+    for (i, p) in mask_r.pixels().enumerate() {
+        mask_data[i] = if p[0] > 127 { 1.0 } else { 0.0 };
+    }
+
+    let out = with_session("lama.onnx", LAMA_URL, model_dir, |s| {
+        let image_t = Tensor::from_array((vec![1i64, 3, th as i64, tw as i64], img_data))?;
+        let mask_t = Tensor::from_array((vec![1i64, 1, th as i64, tw as i64], mask_data))?;
+        let outputs = s.run(inputs![image_t, mask_t])?;
+        let (_, data) = outputs[0].try_extract_tensor::<f32>()?;
+        Ok(data.to_vec())
+    })?;
+
+    // Output assumed (1,3,th,tw) in 0..1 (scaled to 0..255 if it looks normalised).
+    let scale = if out.iter().cloned().fold(0f32, f32::max) <= 1.5 { 255.0 } else { 1.0 };
+    let mut result = RgbImage::new(tw, th);
+    for (i, p) in result.pixels_mut().enumerate() {
+        let r = (out[i] * scale).clamp(0.0, 255.0) as u8;
+        let g = (out[hw + i] * scale).clamp(0.0, 255.0) as u8;
+        let b = (out[2 * hw + i] * scale).clamp(0.0, 255.0) as u8;
+        *p = Rgb([r, g, b]);
+    }
+    let result = image::imageops::resize(&result, w, h, FilterType::Triangle);
+
+    // Composite: take inpainted pixels only where the mask was set.
+    let mut composed = img.clone();
+    for y in 0..h {
+        for x in 0..w {
+            if mask.get_pixel(x, y)[0] > 127 {
+                composed.put_pixel(x, y, *result.get_pixel(x, y));
+            }
+        }
+    }
+    save_rgb(&composed, path)?;
+    Ok(true)
+}
+
+// ─── Enhancement (Real-ESRGAN x4 upscale) ─────────────────────────────────────
+
+/// Upscale `src` into `dest` via Real-ESRGAN. Face restoration is a follow-up
+/// (needs a face-detection + alignment stage).
+pub fn enhance(src: &Path, dest: &Path, model_dir: &Path) -> Result<()> {
+    let mut img = open_rgb(src)?;
+    // Cap input size like the original pipeline to bound memory.
+    let (w, h) = img.dimensions();
+    let max_dim = 1024u32;
+    if w.max(h) > max_dim {
+        let scale = max_dim as f32 / w.max(h) as f32;
+        img = image::imageops::resize(
+            &img,
+            (w as f32 * scale) as u32,
+            (h as f32 * scale) as u32,
+            FilterType::Triangle,
+        );
+    }
+    let (iw, ih) = img.dimensions();
+    let hw = (iw * ih) as usize;
+    let mut data = vec![0f32; 3 * hw];
+    for (i, p) in img.pixels().enumerate() {
+        for c in 0..3 {
+            data[c * hw + i] = p[c] as f32 / 255.0;
+        }
+    }
+
+    let (out, ow, oh) = with_session("realesrgan.onnx", ESRGAN_URL, model_dir, |s| {
+        let t = Tensor::from_array((vec![1i64, 3, ih as i64, iw as i64], data))?;
+        let outputs = s.run(inputs![t])?;
+        let (shape, vals) = outputs[0].try_extract_tensor::<f32>()?;
+        // shape = [1,3,OH,OW]
+        let oh = shape[2] as u32;
+        let ow = shape[3] as u32;
+        Ok((vals.to_vec(), ow, oh))
+    })?;
+
+    let ohw = (ow * oh) as usize;
+    let scale = if out.iter().cloned().fold(0f32, f32::max) <= 1.5 { 255.0 } else { 1.0 };
+    let mut result = RgbImage::new(ow, oh);
+    for (i, p) in result.pixels_mut().enumerate() {
+        let r = (out[i] * scale).clamp(0.0, 255.0) as u8;
+        let g = (out[ohw + i] * scale).clamp(0.0, 255.0) as u8;
+        let b = (out[2 * ohw + i] * scale).clamp(0.0, 255.0) as u8;
+        *p = Rgb([r, g, b]);
+    }
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    save_rgb(&result, dest)?;
+    Ok(())
+}

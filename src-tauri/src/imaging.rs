@@ -9,14 +9,14 @@ use imageproc::region_labelling::{connected_components, Connectivity};
 
 const JPEG_QUALITY: u8 = 97;
 
-fn open_rgb(path: &Path) -> Result<RgbImage> {
+pub(crate) fn open_rgb(path: &Path) -> Result<RgbImage> {
     Ok(ImageReader::open(path)?
         .with_guessed_format()?
         .decode()?
         .to_rgb8())
 }
 
-fn save_rgb(img: &RgbImage, path: &Path) -> Result<()> {
+pub(crate) fn save_rgb(img: &RgbImage, path: &Path) -> Result<()> {
     let mut buf = Vec::new();
     JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY).write_image(
         img.as_raw(),

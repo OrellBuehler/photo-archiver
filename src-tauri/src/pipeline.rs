@@ -32,13 +32,15 @@ pub fn base_name(img: &ImageRecord) -> String {
 
 /// Run a single classical step in place. Returns whether it was handled
 /// (ONNX steps are wired in Phase 3 and return `false` here).
-fn run_step_blocking(step: &str, path: &Path) -> Result<bool> {
+fn run_step_blocking(step: &str, path: &Path, model_dir: &Path) -> Result<bool> {
     match step {
         "orient" => imaging::orient(path).map(|_| true),
         "crop" => imaging::crop(path).map(|_| true),
         "deskew" => imaging::deskew(path).map(|_| true),
         "restore_color" => imaging::restore_color(path).map(|_| true),
         "remove_dust" => imaging::remove_dust(path).map(|_| true),
+        "auto_orient" => crate::ml::orient(path, model_dir),
+        "remove_lines" => crate::ml::remove_lines(path, model_dir),
         _ => Ok(false),
     }
 }
@@ -75,6 +77,7 @@ async fn process_image(
         .await?
         .ok_or_else(|| anyhow!("image not found"))?;
     let mut organized_rel = img.organized_path.clone();
+    let model_dir = state.data_dir.join(".models");
 
     for &step in STEP_ORDER {
         if !steps.iter().any(|s| s.as_str() == step) {
@@ -91,6 +94,7 @@ async fn process_image(
             organized_rel = Some(do_organize(state, &img, source_dir, output_dir).await?);
             true
         } else {
+            // All other steps operate on (or derive from) the organized copy.
             let rel = match &organized_rel {
                 Some(r) if output_dir.join(r).exists() => r.clone(),
                 _ => {
@@ -99,10 +103,26 @@ async fn process_image(
                     r
                 }
             };
-            let abs = output_dir.join(&rel);
-            let step_owned = step.to_string();
-            tauri::async_runtime::spawn_blocking(move || run_step_blocking(&step_owned, &abs))
+            if step == "enhance" {
+                let organized_abs = output_dir.join(&rel);
+                let enhanced_rel = rel.replacen("organized/", "enhanced/", 1);
+                let enhanced_abs = output_dir.join(&enhanced_rel);
+                let md = model_dir.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    crate::ml::enhance(&organized_abs, &enhanced_abs, &md)
+                })
+                .await??;
+                db::set_image_enhanced(&state.db, img_id, &enhanced_rel).await?;
+                true
+            } else {
+                let abs = output_dir.join(&rel);
+                let step_owned = step.to_string();
+                let md = model_dir.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    run_step_blocking(&step_owned, &abs, &md)
+                })
                 .await??
+            }
         };
 
         if handled {

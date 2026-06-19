@@ -91,9 +91,12 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'organize', label: 'Organize', hint: 'Copy into year/month folders' },
   { key: 'orient', label: 'Auto-rotate', hint: 'Apply EXIF orientation' },
   { key: 'crop', label: 'Crop borders', hint: 'Trim white scan borders' },
+  { key: 'auto_orient', label: 'Smart orient', hint: 'ML upright detection (downloads model)' },
   { key: 'deskew', label: 'Deskew', hint: 'Straighten tilted scans' },
   { key: 'restore_color', label: 'Restore color', hint: 'Fix fading & contrast' },
   { key: 'remove_dust', label: 'Remove dust', hint: 'Inpaint specks & scratches' },
+  { key: 'remove_lines', label: 'Remove scan lines', hint: 'LaMa inpaint (downloads model)' },
+  { key: 'enhance', label: 'Enhance', hint: 'Real-ESRGAN upscale (downloads model)' },
 ]
 
 export const MONTHS = [
