@@ -1,0 +1,39 @@
+version: 2
+
+# Dependabot opens automatic PRs to bump dependencies. The ci workflow runs on
+# every PR (including these) so we know the app still builds after an update.
+updates:
+  # Frontend (package.json + bun.lock — Dependabot reads the Bun lockfile).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Bundle non-breaking bumps into one PR; majors get their own PR.
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Rust / Tauri backend.
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions used by the workflows below.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
