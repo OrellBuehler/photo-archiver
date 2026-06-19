@@ -459,3 +459,30 @@ pub async fn all_image_ids(pool: &SqlitePool) -> Result<Vec<i64>> {
         .fetch_all(pool)
         .await?)
 }
+
+pub async fn images_without_phash(pool: &SqlitePool) -> Result<Vec<(i64, String)>> {
+    Ok(
+        sqlx::query_as::<_, (i64, String)>(
+            "SELECT id, source_path FROM images WHERE phash IS NULL",
+        )
+        .fetch_all(pool)
+        .await?,
+    )
+}
+
+pub async fn set_phash(pool: &SqlitePool, id: i64, phash: &str) -> Result<()> {
+    sqlx::query("UPDATE images SET phash = ? WHERE id = ?")
+        .bind(phash)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn images_with_phash(pool: &SqlitePool) -> Result<Vec<(i64, String)>> {
+    Ok(sqlx::query_as::<_, (i64, String)>(
+        "SELECT id, phash FROM images WHERE phash IS NOT NULL ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await?)
+}

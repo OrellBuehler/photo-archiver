@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod exif;
+mod hash;
 mod imaging;
 mod ml;
 mod models;
@@ -89,6 +90,10 @@ pub fn run() {
             commands::bulk_update,
             commands::bulk_delete,
             commands::get_variant,
+            commands::scan_duplicates,
+            commands::find_duplicates,
+            commands::pick_output_folder,
+            commands::update_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

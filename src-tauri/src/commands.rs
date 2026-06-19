@@ -3,11 +3,11 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::models::{
-    AppSettings, FilterCounts, HistoryRecord, ImageFilters, ImageListResponse, ImageRecord,
-    ProgressEvent, TaskOut,
+    AppSettings, DuplicateGroup, FilterCounts, HistoryRecord, ImageFilters, ImageListResponse,
+    ImageRecord, ProgressEvent, TaskOut,
 };
 use crate::state::AppState;
-use crate::{db, imaging, organize, pipeline, scan, thumbnails};
+use crate::{db, hash, imaging, organize, pipeline, scan, thumbnails};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -313,4 +313,106 @@ pub async fn get_variant(
         .map_err(err)?
         .map_err(err)?;
     Ok(Response::new(bytes))
+}
+
+// ─── Duplicates ───────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn scan_duplicates(state: State<'_, AppState>) -> CmdResult<usize> {
+    let source = state.source_dir().ok_or("No source folder selected")?;
+    let pending = db::images_without_phash(&state.db).await.map_err(err)?;
+    let mut done = 0;
+    for (id, rel) in pending {
+        let path = source.join(&rel);
+        let h = tauri::async_runtime::spawn_blocking(move || hash::phash(&path))
+            .await
+            .map_err(err)?;
+        if let Ok(ph) = h {
+            db::set_phash(&state.db, id, &ph).await.map_err(err)?;
+            done += 1;
+        }
+    }
+    Ok(done)
+}
+
+fn group_duplicates(rows: Vec<(i64, String)>, threshold: u32) -> Vec<DuplicateGroup> {
+    let mut used = vec![false; rows.len()];
+    let mut groups = Vec::new();
+    for i in 0..rows.len() {
+        if used[i] {
+            continue;
+        }
+        let mut ids = vec![rows[i].0];
+        let mut max_dist = 0u32;
+        for j in (i + 1)..rows.len() {
+            if used[j] {
+                continue;
+            }
+            if let Some(d) = hash::distance(&rows[i].1, &rows[j].1) {
+                if d <= threshold {
+                    ids.push(rows[j].0);
+                    used[j] = true;
+                    max_dist = max_dist.max(d);
+                }
+            }
+        }
+        if ids.len() > 1 {
+            used[i] = true;
+            groups.push(DuplicateGroup {
+                image_ids: ids,
+                distance: max_dist as i64,
+            });
+        }
+    }
+    groups
+}
+
+#[tauri::command]
+pub async fn find_duplicates(
+    state: State<'_, AppState>,
+    threshold: i64,
+) -> CmdResult<Vec<DuplicateGroup>> {
+    let rows = db::images_with_phash(&state.db).await.map_err(err)?;
+    let groups =
+        tauri::async_runtime::spawn_blocking(move || group_duplicates(rows, threshold.max(0) as u32))
+            .await
+            .map_err(err)?;
+    Ok(groups)
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn pick_output_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<Option<AppSettings>> {
+    let picked = app.dialog().file().blocking_pick_folder();
+    let Some(path) = picked.and_then(|f| f.as_path().map(|p| p.to_path_buf())) else {
+        return Ok(None);
+    };
+    {
+        let mut s = state.settings.lock().unwrap();
+        s.output_dir = Some(path.clone());
+    }
+    db::set_setting(&state.db, "output_dir", &path.to_string_lossy())
+        .await
+        .map_err(err)?;
+    Ok(Some(state.settings_dto()))
+}
+
+#[tauri::command]
+pub async fn update_settings(
+    state: State<'_, AppState>,
+    thumbnail_size: u32,
+) -> CmdResult<AppSettings> {
+    {
+        let mut s = state.settings.lock().unwrap();
+        s.thumbnail_size = thumbnail_size.clamp(100, 1000);
+    }
+    let size = state.thumbnail_size();
+    db::set_setting(&state.db, "thumbnail_size", &size.to_string())
+        .await
+        .map_err(err)?;
+    Ok(state.settings_dto())
 }

@@ -72,6 +72,11 @@ export interface HistoryItem {
   created_at: string
 }
 
+export interface DuplicateGroup {
+  image_ids: number[]
+  distance: number
+}
+
 export type ProgressEvent =
   | { type: 'task_started'; task_id: number; total: number }
   | { type: 'image_started'; task_id: number; image_id: number }

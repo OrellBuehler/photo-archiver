@@ -11,6 +11,8 @@ import Filters from './panels/Filters.svelte'
 import Processing from './panels/Processing.svelte'
 import Tasks from './panels/Tasks.svelte'
 import Viewer from './panels/Viewer.svelte'
+import Duplicates from './panels/Duplicates.svelte'
+import Settings from './panels/Settings.svelte'
 
 // Maps a dockview component name to the Svelte component that renders it.
 const registry: Record<string, Component<any>> = {
@@ -19,6 +21,8 @@ const registry: Record<string, Component<any>> = {
   processing: Processing,
   tasks: Tasks,
   viewer: Viewer,
+  duplicates: Duplicates,
+  settings: Settings,
 }
 
 function createRenderer(name: string): IContentRenderer {
@@ -46,6 +50,8 @@ export function createWorkspace(parent: HTMLElement): DockviewApi {
 
   api.addPanel({ id: 'library', component: 'library', title: 'Library' })
   api.addPanel({ id: 'viewer', component: 'viewer', title: 'Viewer', inactive: true })
+  api.addPanel({ id: 'duplicates', component: 'duplicates', title: 'Duplicates', inactive: true })
+  api.addPanel({ id: 'settings', component: 'settings', title: 'Settings', inactive: true })
   api.addPanel({
     id: 'filters',
     component: 'filters',

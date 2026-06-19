@@ -8,9 +8,11 @@ import {
   imageStats,
   listImages,
   listTasks,
+  pickOutputFolder,
   pickSourceFolder,
   scanSource,
   startBatch,
+  updateSettings,
 } from './api'
 import { clearThumbCache } from './thumbs'
 import type { AppSettings, FilterCounts, Image, ImageFilters, ProgressEvent, Task } from './types'
@@ -213,6 +215,17 @@ class AppStore {
     if (this.selected.size === 0) return
     await bulkUpdate([...this.selected], year, month, title)
     await this.refresh()
+  }
+
+  async pickOutput() {
+    const next = await pickOutputFolder()
+    if (next) this.settings = next
+  }
+
+  async setThumbnailSize(size: number) {
+    this.settings = await updateSettings(size)
+    clearThumbCache()
+    this.thumbVersion++
   }
 }
 

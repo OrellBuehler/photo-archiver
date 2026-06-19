@@ -108,6 +108,12 @@ impl From<TaskRecord> for TaskOut {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateGroup {
+    pub image_ids: Vec<i64>,
+    pub distance: i64,
+}
+
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct HistoryRecord {
     pub id: i64,

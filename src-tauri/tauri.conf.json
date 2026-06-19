@@ -30,6 +30,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Photography",
+    "copyright": "© Orell Bühler",
+    "publisher": "Orell Bühler",
+    "shortDescription": "Restore and organize scanned photos",
+    "longDescription": "A native desktop app for restoring scanned old photos (crop, deskew, colour, dust, scan-line removal, AI enhancement) and organizing them into folders. Works on local and mounted drives.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

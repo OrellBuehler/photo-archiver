@@ -1,6 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type {
   AppSettings,
+  DuplicateGroup,
   FilterCounts,
   HistoryItem,
   Image,
@@ -62,3 +63,10 @@ export async function getVariant(id: number, variant: string): Promise<string> {
   const buf = await invoke<ArrayBuffer>('get_variant', { id, variant })
   return URL.createObjectURL(new Blob([buf], { type: 'image/jpeg' }))
 }
+
+export const scanDuplicates = () => invoke<number>('scan_duplicates')
+export const findDuplicates = (threshold: number) =>
+  invoke<DuplicateGroup[]>('find_duplicates', { threshold })
+export const pickOutputFolder = () => invoke<AppSettings | null>('pick_output_folder')
+export const updateSettings = (thumbnailSize: number) =>
+  invoke<AppSettings>('update_settings', { thumbnailSize })
