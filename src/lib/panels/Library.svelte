@@ -41,6 +41,12 @@
       </span>
     </div>
 
+    {#if store.error}
+      <div class="border-b border-red-900 bg-red-950/60 px-3 py-2 text-xs text-red-300">
+        {store.error}
+      </div>
+    {/if}
+
     <div class="min-h-0 flex-1 overflow-auto p-3">
       {#if store.images.length === 0}
         <div class="flex h-full items-center justify-center text-ink-dim">

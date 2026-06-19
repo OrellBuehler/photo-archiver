@@ -47,6 +47,7 @@ class AppStore {
   loading = $state(false)
   scanning = $state(false)
   lastScanCount = $state<number | null>(null)
+  error = $state<string | null>(null)
 
   tasks = $state<Task[]>([])
   activeTask = $state<ActiveTask | null>(null)
@@ -72,20 +73,28 @@ class AppStore {
   }
 
   async pickFolder() {
-    const next = await pickSourceFolder()
-    if (next) {
-      this.settings = next
-      await this.scan()
+    this.error = null
+    try {
+      const next = await pickSourceFolder()
+      if (next) {
+        this.settings = next
+        await this.scan()
+      }
+    } catch (e) {
+      this.error = String(e)
     }
   }
 
   async scan() {
     if (!this.settings?.source_dir) return
     this.scanning = true
+    this.error = null
     try {
       this.lastScanCount = await scanSource()
       this.page = 1
       await this.refresh()
+    } catch (e) {
+      this.error = String(e)
     } finally {
       this.scanning = false
     }

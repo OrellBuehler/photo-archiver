@@ -26,7 +26,7 @@ pub async fn pick_source_folder(
     state: State<'_, AppState>,
 ) -> CmdResult<Option<AppSettings>> {
     let picked = app.dialog().file().blocking_pick_folder();
-    let Some(path) = picked.and_then(|f| f.as_path().map(|p| p.to_path_buf())) else {
+    let Some(path) = picked.and_then(|f| f.into_path().ok()) else {
         return Ok(None);
     };
 
@@ -388,7 +388,7 @@ pub async fn pick_output_folder(
     state: State<'_, AppState>,
 ) -> CmdResult<Option<AppSettings>> {
     let picked = app.dialog().file().blocking_pick_folder();
-    let Some(path) = picked.and_then(|f| f.as_path().map(|p| p.to_path_buf())) else {
+    let Some(path) = picked.and_then(|f| f.into_path().ok()) else {
         return Ok(None);
     };
     {
