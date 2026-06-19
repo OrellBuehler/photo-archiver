@@ -22,6 +22,20 @@
       <button class="btn-sm" onclick={() => store.scan()} disabled={store.scanning}>
         {store.scanning ? 'Scanning…' : 'Rescan'}
       </button>
+      {#if store.selected.size}
+        <button class="btn-sm" onclick={() => store.clearSelection()}>Clear</button>
+        <button
+          class="btn-sm"
+          onclick={async () => {
+            if (confirm(`Delete ${store.selected.size} photo(s)? This removes processed copies.`))
+              await store.deleteSelected()
+          }}
+        >
+          Delete
+        </button>
+      {:else}
+        <button class="btn-sm" onclick={() => store.selectAllOnPage()}>Select page</button>
+      {/if}
       <span class="ml-auto text-ink-dim">
         {store.total} photos{store.selected.size ? ` · ${store.selected.size} selected` : ''}
       </span>

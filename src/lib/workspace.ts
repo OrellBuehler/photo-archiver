@@ -6,15 +6,19 @@ import {
   type GroupPanelPartInitParameters,
 } from 'dockview-core'
 import { mount, unmount, type Component } from 'svelte'
-import Placeholder from './panels/Placeholder.svelte'
 import Library from './panels/Library.svelte'
 import Filters from './panels/Filters.svelte'
+import Processing from './panels/Processing.svelte'
+import Tasks from './panels/Tasks.svelte'
+import Viewer from './panels/Viewer.svelte'
 
 // Maps a dockview component name to the Svelte component that renders it.
 const registry: Record<string, Component<any>> = {
-  placeholder: Placeholder,
   library: Library,
   filters: Filters,
+  processing: Processing,
+  tasks: Tasks,
+  viewer: Viewer,
 }
 
 function createRenderer(name: string): IContentRenderer {
@@ -25,7 +29,7 @@ function createRenderer(name: string): IContentRenderer {
   return {
     element,
     init(params: GroupPanelPartInitParameters) {
-      const Comp = registry[name] ?? Placeholder
+      const Comp = registry[name] ?? Library
       instance = mount(Comp, { target: element, props: { ...params.params } })
     },
     dispose() {
@@ -41,6 +45,7 @@ export function createWorkspace(parent: HTMLElement): DockviewApi {
   })
 
   api.addPanel({ id: 'library', component: 'library', title: 'Library' })
+  api.addPanel({ id: 'viewer', component: 'viewer', title: 'Viewer', inactive: true })
   api.addPanel({
     id: 'filters',
     component: 'filters',
@@ -49,18 +54,17 @@ export function createWorkspace(parent: HTMLElement): DockviewApi {
   })
   api.addPanel({
     id: 'processing',
-    component: 'placeholder',
+    component: 'processing',
     title: 'Processing',
-    params: { title: 'Processing', hint: 'Choose pipeline steps and run them. (Phase 2)' },
     position: { referencePanel: 'library', direction: 'right' },
   })
   api.addPanel({
     id: 'tasks',
-    component: 'placeholder',
+    component: 'tasks',
     title: 'Tasks',
-    params: { title: 'Tasks', hint: 'Live task progress and history. (Phase 2)' },
-    position: { referencePanel: 'library', direction: 'below' },
+    position: { referencePanel: 'processing', direction: 'below' },
   })
 
+  api.getPanel('library')?.api.setActive()
   return api
 }

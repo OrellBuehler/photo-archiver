@@ -10,6 +10,7 @@
 
   onMount(() => {
     api = createWorkspace(dockEl)
+    store.dockApi = api
     store.init()
     return () => api?.dispose()
   })

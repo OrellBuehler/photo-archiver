@@ -1,11 +1,16 @@
 mod commands;
 mod db;
+mod exif;
+mod imaging;
 mod models;
+mod organize;
+mod pipeline;
 mod scan;
 mod state;
 mod thumbnails;
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 use tauri::Manager;
@@ -57,6 +62,9 @@ pub fn run() {
                     thumbnail_size,
                 }),
                 data_dir,
+                running: AtomicBool::new(false),
+                cancel: AtomicBool::new(false),
+                current_task: Mutex::new(None),
             });
 
             Ok(())
@@ -70,6 +78,16 @@ pub fn run() {
             commands::image_stats,
             commands::get_image,
             commands::get_thumbnail,
+            commands::start_batch,
+            commands::cancel_task,
+            commands::list_tasks,
+            commands::get_task,
+            commands::image_history,
+            commands::rotate_image,
+            commands::update_image,
+            commands::bulk_update,
+            commands::bulk_delete,
+            commands::get_variant,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
