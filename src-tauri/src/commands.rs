@@ -25,10 +25,12 @@ pub async fn pick_source_folder(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> CmdResult<Option<AppSettings>> {
-    let picked = app.dialog().file().blocking_pick_folder();
-    let Some(path) = picked.and_then(|f| f.into_path().ok()) else {
+    let Some(file) = app.dialog().file().blocking_pick_folder() else {
+        log::info!("pick_source_folder: dialog cancelled");
         return Ok(None);
     };
+    log::info!("pick_source_folder: selected {file:?}");
+    let path = file.into_path().map_err(err)?;
 
     {
         let mut s = state.settings.lock().unwrap();
@@ -387,10 +389,12 @@ pub async fn pick_output_folder(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> CmdResult<Option<AppSettings>> {
-    let picked = app.dialog().file().blocking_pick_folder();
-    let Some(path) = picked.and_then(|f| f.into_path().ok()) else {
+    let Some(file) = app.dialog().file().blocking_pick_folder() else {
+        log::info!("pick_output_folder: dialog cancelled");
         return Ok(None);
     };
+    log::info!("pick_output_folder: selected {file:?}");
+    let path = file.into_path().map_err(err)?;
     {
         let mut s = state.settings.lock().unwrap();
         s.output_dir = Some(path.clone());
