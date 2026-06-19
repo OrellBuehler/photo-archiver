@@ -1,12 +1,17 @@
 name: build
 
-# Manual runs upload installers as artifacts; pushing a v* tag also creates a
-# draft GitHub release with the installers attached.
+# Publishing a GitHub release builds the installers for all three platforms and
+# uploads them to that release. Manual runs (workflow_dispatch) just build and
+# upload the installers as workflow artifacts, without touching any release.
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types:
+      - published
+
+# Needed to upload the built installers to the release.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -55,11 +60,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # On a v* tag this publishes a draft release; otherwise it just builds.
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: 'Photo Archiver ${{ github.ref_name }}'
-          releaseDraft: true
-          releaseBody: 'See the assets below to download and install.'
+          # On a release event this uploads the installers to that release;
+          # on manual runs releaseId is empty, so it only builds.
+          releaseId: ${{ github.event.release.id }}
 
       - name: Upload installers as artifacts
         uses: actions/upload-artifact@v4
