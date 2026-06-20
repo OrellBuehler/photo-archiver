@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store } from '../store.svelte'
   import { MONTHS } from '../types'
+  import Icon from '../ui/Icon.svelte'
 
   const f = $derived(store.filters)
   const hasActive = $derived(
@@ -31,7 +32,10 @@
 
 <div class="flex h-full flex-col gap-4 overflow-auto bg-base p-3 text-sm">
   <div class="flex items-center justify-between">
-    <h2 class="text-xs font-semibold uppercase tracking-wide text-ink-dim">Filters</h2>
+    <h2 class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+      <Icon name="sliders" size={15} class="text-ink-dim" />
+      Filters
+    </h2>
     {#if hasActive}
       <button class="text-xs text-ink-dim hover:text-ink" onclick={() => store.clearFilters()}>
         Clear
@@ -41,7 +45,7 @@
 
   {#if store.counts.years.length}
     <section>
-      <h3 class="mb-2 text-[11px] font-semibold uppercase text-ink-dim">Year</h3>
+      <h3 class="eyebrow mb-2">Year</h3>
       <div class="flex flex-wrap gap-1.5">
         {#each store.counts.years as y (y.value)}
           <button class="pill" class:pill-active={yearActive(y.value)} onclick={() => pickYear(y.value)}>
@@ -55,7 +59,7 @@
 
   {#if store.counts.months.length}
     <section>
-      <h3 class="mb-2 text-[11px] font-semibold uppercase text-ink-dim">Month</h3>
+      <h3 class="eyebrow mb-2">Month</h3>
       <div class="flex flex-wrap gap-1.5">
         {#each store.counts.months as m (m.value)}
           <button class="pill" class:pill-active={f.month === Number(m.value)} onclick={() => pickMonth(m.value)}>
@@ -69,7 +73,7 @@
 
   {#if store.counts.statuses.length}
     <section>
-      <h3 class="mb-2 text-[11px] font-semibold uppercase text-ink-dim">Status</h3>
+      <h3 class="eyebrow mb-2">Status</h3>
       <div class="flex flex-wrap gap-1.5">
         {#each store.counts.statuses as s (s.value)}
           <button class="pill" class:pill-active={f.status === s.value} onclick={() => pickStatus(s.value)}>
