@@ -51,6 +51,8 @@
   $effect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!image || editing) return
+      // Only browse when the Viewer is the focused dockview panel.
+      if (store.dockApi?.activeGroup?.activePanel?.id !== 'viewer') return
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
       if (e.key === 'ArrowRight') go(1)
