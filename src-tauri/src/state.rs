@@ -43,9 +43,15 @@ impl AppState {
 
     pub fn settings_dto(&self) -> AppSettings {
         let s = self.settings.lock().unwrap();
+        // Derive the output dir from this same guard — calling self.output_dir()
+        // here would re-lock the non-reentrant mutex and deadlock.
+        let output_dir = s
+            .output_dir
+            .clone()
+            .unwrap_or_else(|| self.data_dir.join("output"));
         AppSettings {
             source_dir: s.source_dir.as_ref().map(|p| p.to_string_lossy().into_owned()),
-            output_dir: Some(self.output_dir().to_string_lossy().into_owned()),
+            output_dir: Some(output_dir.to_string_lossy().into_owned()),
             thumbnail_size: s.thumbnail_size,
         }
     }
