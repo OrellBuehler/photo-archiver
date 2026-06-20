@@ -8,10 +8,17 @@
 </script>
 
 <div class="flex h-full flex-col bg-base">
+  {#if store.error}
+    <div class="border-b border-red-900 bg-red-950/60 px-3 py-2 text-xs text-red-300">
+      {store.error}
+    </div>
+  {/if}
+
   {#if !store.settings?.source_dir}
     <div class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
       <p class="text-ink-dim">No source folder selected.</p>
       <button class="btn" onclick={() => store.pickFolder()}>Choose source folder…</button>
+      {#if store.scanning}<p class="text-ink-dim">Scanning…</p>{/if}
     </div>
   {:else}
     <div class="flex items-center gap-2 border-b border-line px-3 py-2 text-xs">
@@ -40,12 +47,6 @@
         {store.total} photos{store.selected.size ? ` · ${store.selected.size} selected` : ''}
       </span>
     </div>
-
-    {#if store.error}
-      <div class="border-b border-red-900 bg-red-950/60 px-3 py-2 text-xs text-red-300">
-        {store.error}
-      </div>
-    {/if}
 
     <div class="min-h-0 flex-1 overflow-auto p-3">
       {#if store.images.length === 0}
