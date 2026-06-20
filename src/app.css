@@ -137,6 +137,15 @@ body {
   }
 }
 
+@keyframes pa-indeterminate {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
 /* Warm up the dockview panel chrome to match the palette. */
 .dockview-theme-vs {
   --dv-background-color: var(--color-base);
