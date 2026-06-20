@@ -42,12 +42,20 @@ function createRenderer(name: string): IContentRenderer {
   }
 }
 
-export function createWorkspace(parent: HTMLElement): DockviewApi {
-  const api = createDockview(parent, {
-    theme: themeVisualStudio,
-    createComponent: (options) => createRenderer(options.name),
-  })
+const LAYOUT_KEY = 'photo-archiver:layout'
+// Bump when the default panel set changes so stale saved layouts are discarded.
+const LAYOUT_VERSION = 1
+const EXPECTED_PANELS = [
+  'library',
+  'viewer',
+  'duplicates',
+  'settings',
+  'filters',
+  'processing',
+  'tasks',
+]
 
+function buildDefaultLayout(api: DockviewApi) {
   api.addPanel({ id: 'library', component: 'library', title: 'Library' })
   api.addPanel({ id: 'viewer', component: 'viewer', title: 'Viewer', inactive: true })
   api.addPanel({ id: 'duplicates', component: 'duplicates', title: 'Duplicates', inactive: true })
@@ -56,21 +64,76 @@ export function createWorkspace(parent: HTMLElement): DockviewApi {
     id: 'filters',
     component: 'filters',
     title: 'Filters',
+    initialWidth: 260,
     position: { referencePanel: 'library', direction: 'left' },
   })
   api.addPanel({
     id: 'processing',
     component: 'processing',
     title: 'Processing',
+    initialWidth: 320,
     position: { referencePanel: 'library', direction: 'right' },
   })
   api.addPanel({
     id: 'tasks',
     component: 'tasks',
     title: 'Tasks',
+    initialHeight: 240,
     position: { referencePanel: 'processing', direction: 'below' },
   })
 
   api.getPanel('library')?.api.setActive()
+}
+
+function restoreLayout(api: DockviewApi): boolean {
+  let raw: string | null = null
+  try {
+    raw = localStorage.getItem(LAYOUT_KEY)
+  } catch {
+    return false
+  }
+  if (!raw) return false
+
+  try {
+    const saved = JSON.parse(raw)
+    if (saved?.version !== LAYOUT_VERSION || !saved.layout) return false
+    api.fromJSON(saved.layout)
+    // Guard against a stale layout that is missing panels we now ship.
+    const present = new Set(api.panels.map((p) => p.id))
+    if (!EXPECTED_PANELS.every((id) => present.has(id))) {
+      api.clear()
+      return false
+    }
+    return true
+  } catch {
+    try {
+      api.clear()
+    } catch {}
+    return false
+  }
+}
+
+function saveLayout(api: DockviewApi) {
+  try {
+    const payload = { version: LAYOUT_VERSION, layout: api.toJSON() }
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(payload))
+  } catch {}
+}
+
+export function createWorkspace(parent: HTMLElement): DockviewApi {
+  const api = createDockview(parent, {
+    theme: themeVisualStudio,
+    createComponent: (options) => createRenderer(options.name),
+  })
+
+  if (!restoreLayout(api)) buildDefaultLayout(api)
+
+  // Persist user layout changes (resize, move, tab reorder) after they settle.
+  let saveTimer: ReturnType<typeof setTimeout> | undefined
+  api.onDidLayoutChange(() => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => saveLayout(api), 400)
+  })
+
   return api
 }
