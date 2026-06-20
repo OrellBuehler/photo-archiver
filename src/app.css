@@ -1,21 +1,86 @@
+/* Newsreader (serif) — reserved for emotional moments (empty states, review
+   headline). Added webfont; falls back to Georgia offline. */
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap');
 @import 'tailwindcss';
 @import 'dockview-core/dist/styles/dockview.css';
 
-/* VS Code-like dark palette, exposed as Tailwind v4 design tokens. */
+/* Warm, restoration-focused desktop palette, exposed as Tailwind v4 tokens.
+   Original token NAMES are preserved so existing utilities keep working —
+   they are only re-valued and extended. */
 @theme {
-  --color-base: #1e1e1e;
-  --color-surface: #252526;
-  --color-surface-2: #2d2d30;
-  --color-bar: #323233;
-  --color-line: #3c3c3c;
-  --color-ink: #cccccc;
-  --color-ink-dim: #858585;
-  --color-brand: #0e639c;
-  --color-brand-hover: #1177bb;
-  --color-focus: #007acc;
+  /* Neutral surfaces — warm charcoal (~35° hue, low chroma) */
+  --color-base: #1b1916;
+  --color-surface: #232019;
+  --color-surface-2: #2c2823;
+  --color-bar: #322e28;
+  --color-line: #3e3933;
+
+  /* Ink — warm off-white, three levels */
+  --color-ink: #ece7df;
+  --color-ink-dim: #9c948a;
+  --color-ink-faint: #6e675f;
+
+  /* Brand — honey/amber: the restoration warmth (dark text on amber) */
+  --color-brand: #e08a3c;
+  --color-brand-hover: #ee9a4d;
+  --color-brand-press: #c9772f;
+  --color-brand-soft: #3a2c1c;
+  --color-on-brand: #2a1a06;
+
+  /* Focus / trust blue — rings, links, info, "organized" status */
+  --color-focus: #4f9be0;
+  --color-focus-soft: #1f2c3a;
+
+  /* Semantic status — scannable status language */
+  --color-success: #6fbf73;
+  --color-success-soft: #1e2c1e;
+  --color-warning: #e6b53f;
+  --color-warning-soft: #322811;
+  --color-danger: #e8675a;
+  --color-danger-soft: #36201d;
+  --color-info: #4f9be0;
+  --color-info-soft: #1f2c3a;
 
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
     sans-serif;
+  --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root {
+  /* Semantic aliases (non-utility — referenced via var() in components) */
+  --bg-overlay: rgba(12, 10, 8, 0.66);
+  --border-strong: #4d473f;
+  --border-faint: #2f2b25;
+  --text-on-accent: var(--color-on-brand);
+
+  /* Status → semantic */
+  --status-new: var(--color-ink-dim);
+  --status-organized: var(--color-info);
+  --status-enhanced: var(--color-success);
+  --status-processing: var(--color-warning);
+  --status-failed: var(--color-danger);
+
+  /* Radii — subtle; this is a tool, not a toy */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadows — warm-tinted, soft */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.42);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-accent: 0 4px 16px rgba(224, 138, 60, 0.28);
+  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  /* Motion — quick and calm */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-fast: 110ms;
+  --dur-base: 180ms;
+  --dur-slow: 280ms;
 }
 
 html,
@@ -30,9 +95,11 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   font-size: 13px;
+  line-height: 1.5;
   overflow: hidden;
   user-select: none;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 #app {
@@ -40,17 +107,111 @@ body {
   flex-direction: column;
 }
 
+/* Custom scrollbars — subtle, warm, desktop-native */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::selection {
+  background: var(--color-brand-soft);
+  color: var(--color-ink);
+}
+
+@keyframes pa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Warm up the dockview panel chrome to match the palette. */
+.dockview-theme-vs {
+  --dv-background-color: var(--color-base);
+  --dv-group-view-background-color: var(--color-base);
+  --dv-tabs-and-actions-container-background-color: var(--color-bar);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-bar);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-bar);
+  --dv-activegroup-visiblepanel-tab-color: var(--color-ink);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-ink-dim);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-ink-dim);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-ink-faint);
+  --dv-tab-divider-color: var(--color-line);
+  --dv-separator-border: var(--color-line);
+  --dv-paneview-header-border-color: var(--color-line);
+  --dv-icon-hover-background-color: var(--color-surface-2);
+  --dv-active-sash-color: var(--color-brand);
+  --dv-sash-color: transparent;
+  --dv-tabs-container-scrollbar-color: var(--border-strong);
+}
+
 @layer components {
+  /* Primary action — amber with dark ink + soft amber glow. One per view. */
   .btn {
-    @apply rounded bg-brand px-3 py-1.5 text-white hover:bg-brand-hover disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-[5px] bg-brand px-3 py-1.5 font-medium text-on-brand transition-colors hover:bg-brand-hover active:bg-brand-press disabled:opacity-40 disabled:shadow-none;
+    box-shadow: var(--shadow-accent);
   }
+  .btn:active:not(:disabled) {
+    transform: scale(0.985);
+  }
+
+  /* Secondary / ghost — subtle bordered surface control. */
   .btn-sm {
-    @apply rounded border border-line bg-surface px-2 py-1 text-ink-dim hover:bg-surface-2 hover:text-ink disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-[5px] border border-line bg-surface px-2 py-1 text-ink-dim transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40;
   }
+  .btn-sm-active {
+    @apply border-brand/45 bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand;
+  }
+
+  /* Destructive. */
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-[5px] border border-danger/40 bg-transparent px-2 py-1 text-danger transition-colors hover:bg-danger-soft disabled:opacity-40;
+  }
+
+  /* Counted filter chip. */
   .pill {
-    @apply flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-ink-dim hover:bg-surface-2 hover:text-ink;
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-ink-dim transition-colors hover:bg-surface-2 hover:text-ink;
   }
   .pill-active {
-    @apply border-focus bg-brand text-white hover:bg-brand-hover;
+    @apply border-brand/45 bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand;
+  }
+
+  /* Form field. */
+  .input {
+    @apply w-full rounded-[3px] border border-line bg-surface px-2 py-1 text-ink transition-colors;
+  }
+  .input::placeholder {
+    color: var(--color-ink-faint);
+  }
+  .btn:focus-visible,
+  .btn-sm:focus-visible,
+  .btn-danger:focus-visible,
+  .pill:focus-visible,
+  .input:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 1px;
+  }
+  .input:focus-visible {
+    border-color: transparent;
+  }
+
+  /* Eyebrow / section label. */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase text-ink-dim;
+    letter-spacing: 0.04em;
   }
 }

@@ -17,11 +17,24 @@
 </script>
 
 <div
-  class="flex h-8 shrink-0 items-center border-b border-line bg-bar select-none"
+  class="flex h-8 shrink-0 items-center border-b border-line bg-bar shadow-[var(--shadow-inset)] select-none"
   data-tauri-drag-region
 >
   <div class="flex items-center gap-2 px-3 text-xs font-medium text-ink-dim" data-tauri-drag-region>
-    <span class="h-3 w-3 rounded-sm bg-brand"></span>
+    <svg width="16" height="16" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="60" height="60" rx="14" fill="#e08a3c" />
+      <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#tbg)" fill-opacity="0.18" />
+      <rect x="16" y="20" width="32" height="26" rx="4" fill="#2a1a06" fill-opacity="0.25" />
+      <rect x="18" y="16" width="28" height="24" rx="4" fill="#fdf6ec" />
+      <circle cx="26" cy="24" r="3.2" fill="#e08a3c" />
+      <path d="M19 39 L29 30 L34 34 L40 28 L45 34 L45 38 a2 2 0 0 1 -2 2 H21 a2 2 0 0 1 -2 -2 Z" fill="#c9772f" />
+      <defs>
+        <linearGradient id="tbg" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#ffffff" />
+          <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+    </svg>
     Photo Archiver
   </div>
 
