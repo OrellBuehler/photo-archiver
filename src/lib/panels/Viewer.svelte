@@ -1,7 +1,9 @@
 <script lang="ts">
   import { store } from '../store.svelte'
   import { getImage, getVariant, imageHistory, rotateImage, updateImage } from '../api'
-  import type { HistoryItem, Image } from '../types'
+  import { MONTHS, type HistoryItem, type Image } from '../types'
+  import Icon from '../ui/Icon.svelte'
+  import Badge from '../ui/Badge.svelte'
 
   type Variant = 'source' | 'organized' | 'enhanced'
 
@@ -14,6 +16,9 @@
   let split = $state(50)
   let editing = $state(false)
   let form = $state({ year: '', month: '', title: '' })
+
+  let stageEl = $state<HTMLDivElement>()
+  let dragging = false
 
   $effect(() => {
     const id = store.focusedImageId
@@ -33,6 +38,45 @@
     return v
   })
 
+  // Browse within the current library page.
+  const idx = $derived(image ? store.images.findIndex((i) => i.id === image!.id) : -1)
+
+  function go(d: number) {
+    const imgs = store.images
+    if (idx < 0 || imgs.length === 0) return
+    const next = imgs[(idx + d + imgs.length) % imgs.length]
+    if (next) store.openImage(next.id)
+  }
+
+  $effect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!image || editing) return
+      const t = e.target as HTMLElement
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (e.key === 'ArrowRight') go(1)
+      else if (e.key === 'ArrowLeft') go(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  function setFromClientX(clientX: number) {
+    if (!stageEl) return
+    const r = stageEl.getBoundingClientRect()
+    split = Math.max(0, Math.min(100, ((clientX - r.left) / r.width) * 100))
+  }
+
+  $effect(() => {
+    const move = (e: MouseEvent) => dragging && setFromClientX(e.clientX)
+    const up = () => (dragging = false)
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+  })
+
   async function load(id: number) {
     image = await getImage(id)
     history = await imageHistory(id)
@@ -44,6 +88,7 @@
     }
     variant = image.enhanced_path ? 'enhanced' : image.organized_path ? 'organized' : 'source'
     comparing = false
+    split = 50
     await loadVariant()
   }
 
@@ -61,6 +106,7 @@
   async function toggleCompare() {
     comparing = !comparing
     if (comparing && image) {
+      split = 50
       if (compareUrl) URL.revokeObjectURL(compareUrl)
       compareUrl = await getVariant(image.id, 'source')
     }
@@ -86,85 +132,149 @@
 
 <div class="flex h-full flex-col bg-base">
   {#if !image}
-    <div class="flex flex-1 items-center justify-center p-6 text-center text-ink-dim">
-      Double-click a photo to open it here.
+    <div class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+      <div
+        class="grid h-14 w-14 place-items-center rounded-[12px] text-ink-dim"
+        style="background: var(--color-surface-2);"
+      >
+        <Icon name="columns" size={26} stroke={1.5} />
+      </div>
+      <div class="flex flex-col gap-1">
+        <p class="font-serif text-xl text-ink">Nothing open yet</p>
+        <p class="text-sm text-ink-dim">Double-click a photo to compare its before & after here.</p>
+      </div>
     </div>
   {:else}
     <div class="flex items-center gap-1 border-b border-line px-2 py-1.5 text-xs">
       {#each variants as v (v)}
-        <button class="btn-sm" class:!bg-brand={variant === v && !comparing} onclick={() => pick(v)}>
+        <button class="btn-sm" class:btn-sm-active={variant === v && !comparing} onclick={() => pick(v)}>
           {v}
         </button>
       {/each}
       <div class="ml-auto flex items-center gap-1">
         {#if variants.length > 1}
-          <button class="btn-sm" class:!bg-brand={comparing} onclick={toggleCompare}>Compare</button>
+          <button class="btn-sm" class:btn-sm-active={comparing} onclick={toggleCompare}>
+            <Icon name="columns" size={13} />
+            Compare
+          </button>
         {/if}
-        <button class="btn-sm" title="Rotate left" onclick={() => rotate(false)}>↺</button>
-        <button class="btn-sm" title="Rotate right" onclick={() => rotate(true)}>↻</button>
+        <button class="btn-sm" title="Rotate left" aria-label="Rotate left" onclick={() => rotate(false)}>
+          <Icon name="rotateCcw" size={14} />
+        </button>
+        <button class="btn-sm" title="Rotate right" aria-label="Rotate right" onclick={() => rotate(true)}>
+          <Icon name="rotateCw" size={14} />
+        </button>
+        {#if store.images.length > 1}
+          <button class="btn-sm" title="Previous" aria-label="Previous" onclick={() => go(-1)}>
+            <Icon name="chevronLeft" size={14} />
+          </button>
+          <span class="min-w-[44px] text-center tabular-nums text-ink-dim">{idx + 1} / {store.images.length}</span>
+          <button class="btn-sm" title="Next" aria-label="Next" onclick={() => go(1)}>
+            <Icon name="chevronRight" size={14} />
+          </button>
+        {/if}
       </div>
     </div>
 
-    <div class="relative min-h-0 flex-1 overflow-hidden bg-black/40">
+    <div
+      bind:this={stageEl}
+      class="relative min-h-0 flex-1 overflow-hidden bg-black"
+      class:cursor-ew-resize={comparing && compareUrl}
+      onmousedown={(e) => {
+        if (comparing && compareUrl) {
+          dragging = true
+          setFromClientX(e.clientX)
+        }
+      }}
+      role="presentation"
+    >
       {#if comparing && compareUrl && url}
-        <img src={compareUrl} alt="source" class="absolute inset-0 h-full w-full object-contain" />
+        <!-- after (selected variant) — full -->
+        <img src={url} alt={variant} draggable="false" class="absolute inset-0 h-full w-full object-contain" />
+        <span
+          class="eyebrow pointer-events-none absolute right-2.5 top-2.5 rounded-[3px] px-2 py-0.5 text-ink"
+          style="background: var(--bg-overlay); backdrop-filter: blur(4px);"
+        >{variant}</span>
+
+        <!-- before (source) — clipped to left of divider -->
         <div class="absolute inset-0 overflow-hidden" style="clip-path: inset(0 {100 - split}% 0 0)">
-          <img src={url} alt={variant} class="h-full w-full object-contain" />
+          <img src={compareUrl} alt="source" draggable="false" class="absolute inset-0 h-full w-full object-contain" />
+          <span
+            class="eyebrow pointer-events-none absolute left-2.5 top-2.5 rounded-[3px] px-2 py-0.5 text-ink"
+            style="background: var(--bg-overlay); backdrop-filter: blur(4px);"
+          >original</span>
         </div>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          bind:value={split}
-          class="absolute bottom-3 left-1/2 w-2/3 -translate-x-1/2 accent-[var(--color-focus)]"
-        />
-        <span class="absolute left-2 top-2 rounded bg-black/60 px-1.5 text-[11px]">source</span>
-        <span class="absolute right-2 top-2 rounded bg-black/60 px-1.5 text-[11px]">{variant}</span>
+
+        <!-- divider + amber handle -->
+        <div
+          class="pointer-events-none absolute bottom-0 top-0"
+          style="left: {split}%; width: 2px; background: var(--color-brand); transform: translateX(-1px);"
+        >
+          <span
+            class="absolute left-1/2 top-1/2 grid h-[34px] w-[34px] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full shadow-[var(--shadow-md)]"
+            style="background: var(--color-brand); color: var(--color-on-brand);"
+          >
+            <Icon name="columns" size={17} stroke={2.1} />
+          </span>
+        </div>
       {:else if url}
         <img src={url} alt={variant} class="absolute inset-0 h-full w-full object-contain" />
       {/if}
     </div>
 
-    <div class="max-h-64 shrink-0 overflow-auto border-t border-line p-3 text-sm">
-      <div class="mb-2 flex items-center justify-between">
-        <span class="truncate font-medium text-ink" title={image.filename}>
+    <div class="max-h-72 shrink-0 overflow-auto border-t border-line bg-surface p-3.5 text-sm">
+      <div class="mb-3 flex items-center gap-2">
+        <h2 class="min-w-0 flex-1 truncate font-serif text-lg text-ink" title={image.filename}>
           {image.title ?? image.filename}
-        </span>
-        <button class="text-xs text-ink-dim hover:text-ink" onclick={() => (editing = !editing)}>
-          {editing ? 'Cancel' : 'Edit'}
+        </h2>
+        <Badge status={image.status} />
+        <button class="btn-sm" onclick={() => (editing = !editing)}>
+          {#if editing}Cancel{:else}<Icon name="edit" size={13} />Edit{/if}
         </button>
       </div>
 
       {#if editing}
-        <div class="flex flex-col gap-2">
-          <label class="flex items-center gap-2">
-            <span class="w-14 text-ink-dim">Year</span>
-            <input class="flex-1 rounded border border-line bg-surface px-2 py-1" bind:value={form.year} />
+        <div class="flex flex-col gap-2.5">
+          <div class="grid grid-cols-2 gap-2.5">
+            <label class="flex flex-col gap-1">
+              <span class="eyebrow">Year</span>
+              <input class="input" bind:value={form.year} placeholder="????" />
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="eyebrow">Month</span>
+              <select class="input" bind:value={form.month}>
+                <option value="">—</option>
+                {#each MONTHS.slice(1) as name, i (i)}
+                  <option value={String(i + 1)}>{name}</option>
+                {/each}
+              </select>
+            </label>
+          </div>
+          <label class="flex flex-col gap-1">
+            <span class="eyebrow">Title</span>
+            <input class="input" bind:value={form.title} placeholder="Add a title…" />
           </label>
-          <label class="flex items-center gap-2">
-            <span class="w-14 text-ink-dim">Month</span>
-            <input class="flex-1 rounded border border-line bg-surface px-2 py-1" bind:value={form.month} />
-          </label>
-          <label class="flex items-center gap-2">
-            <span class="w-14 text-ink-dim">Title</span>
-            <input class="flex-1 rounded border border-line bg-surface px-2 py-1" bind:value={form.title} />
-          </label>
-          <button class="btn" onclick={save}>Save</button>
+          <button class="btn mt-1" onclick={save}>
+            <Icon name="check" size={15} />
+            Save
+          </button>
         </div>
       {:else}
-        <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-ink-dim">
-          <dt>Status</dt>
-          <dd class="text-ink">{image.status}</dd>
-          <dt>Year / Month</dt>
-          <dd class="text-ink">{image.year ?? '—'} / {image.month ?? '—'}</dd>
+        <div class="eyebrow mb-2">Details</div>
+        <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-ink-dim">
+          <dt>Filed</dt>
+          <dd class="font-mono text-ink">
+            {image.year ?? '????'}/{String(image.month ?? 0).padStart(2, '0')}/
+            {#if image.month}<span class="text-ink-dim">· {MONTHS[image.month]}</span>{/if}
+          </dd>
           <dt>Dimensions</dt>
           <dd class="text-ink">{image.width ?? '?'} × {image.height ?? '?'}</dd>
           <dt>Source</dt>
-          <dd class="truncate text-ink" title={image.source_path}>{image.source_path}</dd>
+          <dd class="truncate font-mono text-ink" title={image.source_path}>{image.source_path}</dd>
         </dl>
 
         {#if history.length}
-          <h3 class="mt-3 mb-1 text-[11px] font-semibold uppercase text-ink-dim">History</h3>
+          <h3 class="eyebrow mb-1 mt-3">History</h3>
           <ul class="flex flex-col gap-0.5 text-xs text-ink-dim">
             {#each history as h (h.id)}
               <li>{h.step} <span class="opacity-60">· {h.created_at.replace('T', ' ').slice(0, 16)}</span></li>
