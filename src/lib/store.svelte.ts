@@ -212,6 +212,14 @@ class AppStore {
     this.dockApi?.getPanel('viewer')?.api.setActive()
   }
 
+  activatePanel(id: string) {
+    this.dockApi?.getPanel(id)?.api.setActive()
+  }
+
+  statusCount(value: string) {
+    return this.counts.statuses.find((s) => s.value === value)?.count ?? 0
+  }
+
   async deleteSelected() {
     if (this.selected.size === 0) return
     const n = await bulkDelete([...this.selected])
