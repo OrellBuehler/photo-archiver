@@ -90,18 +90,40 @@ export interface PipelineStep {
   key: string
   label: string
   hint: string
+  icon: string
+  model?: boolean
 }
 
 export const PIPELINE_STEPS: PipelineStep[] = [
-  { key: 'organize', label: 'Organize', hint: 'Copy into year/month folders' },
-  { key: 'orient', label: 'Auto-rotate', hint: 'Apply EXIF orientation' },
-  { key: 'crop', label: 'Crop borders', hint: 'Trim white scan borders' },
-  { key: 'auto_orient', label: 'Smart orient', hint: 'ML upright detection (downloads model)' },
-  { key: 'deskew', label: 'Deskew', hint: 'Straighten tilted scans' },
-  { key: 'restore_color', label: 'Restore color', hint: 'Fix fading & contrast' },
-  { key: 'remove_dust', label: 'Remove dust', hint: 'Inpaint specks & scratches' },
-  { key: 'remove_lines', label: 'Remove scan lines', hint: 'LaMa inpaint (downloads model)' },
-  { key: 'enhance', label: 'Enhance', hint: 'Real-ESRGAN upscale (downloads model)' },
+  { key: 'organize', label: 'Organize', hint: 'Copy into year/month folders', icon: 'folderTree' },
+  { key: 'orient', label: 'Auto-rotate', hint: 'Apply EXIF orientation', icon: 'rotateSquare' },
+  { key: 'crop', label: 'Crop borders', hint: 'Trim white scan borders', icon: 'crop' },
+  { key: 'auto_orient', label: 'Smart orient', hint: 'ML upright detection', icon: 'image', model: true },
+  { key: 'deskew', label: 'Deskew', hint: 'Straighten tilted scans', icon: 'scanLine' },
+  { key: 'restore_color', label: 'Restore color', hint: 'Fix fading & contrast', icon: 'palette' },
+  { key: 'remove_dust', label: 'Remove dust', hint: 'Inpaint specks & scratches', icon: 'sparkles' },
+  { key: 'remove_lines', label: 'Remove scan lines', hint: 'LaMa inpaint', icon: 'layers', model: true },
+  { key: 'enhance', label: 'Enhance', hint: 'Real-ESRGAN upscale', icon: 'wand', model: true },
+]
+
+export interface Preset {
+  key: string
+  label: string
+  steps: string[]
+  desc: string
+}
+
+// Curated bundles — a friendlier entry than the flat step checklist.
+export const PRESETS: Preset[] = [
+  { key: 'file', label: 'Just file it', steps: ['organize'], desc: 'Sort into folders, no edits' },
+  { key: 'tidy', label: 'Quick tidy', steps: ['organize', 'orient', 'crop', 'deskew'], desc: 'Straighten, crop, organize' },
+  {
+    key: 'restore',
+    label: 'Full restore',
+    steps: ['organize', 'crop', 'deskew', 'restore_color', 'remove_dust'],
+    desc: 'Recommended for faded photos',
+  },
+  { key: 'max', label: 'Everything', steps: PIPELINE_STEPS.map((s) => s.key), desc: 'All steps incl. ML upscale' },
 ]
 
 export const MONTHS = [

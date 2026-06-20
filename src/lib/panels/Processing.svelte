@@ -1,6 +1,8 @@
 <script lang="ts">
   import { store } from '../store.svelte'
-  import { PIPELINE_STEPS } from '../types'
+  import { PIPELINE_STEPS, PRESETS } from '../types'
+  import Icon from '../ui/Icon.svelte'
+  import StepCard from '../ui/StepCard.svelte'
 
   let selectedSteps = $state<Set<string>>(new Set(['organize', 'crop', 'restore_color']))
 
@@ -11,6 +13,18 @@
     selectedSteps = next
   }
 
+  function applyPreset(steps: string[]) {
+    selectedSteps = new Set(steps)
+  }
+
+  const activePreset = $derived.by(() => {
+    for (const p of PRESETS) {
+      if (p.steps.length === selectedSteps.size && p.steps.every((s) => selectedSteps.has(s)))
+        return p.key
+    }
+    return null
+  })
+
   const active = $derived(store.activeTask)
   const pct = $derived(
     active && active.total > 0
@@ -18,28 +32,101 @@
       : 0,
   )
 
+  // Pipeline-ordered view of the selected steps, for live "done / running" state.
+  const orderedSelected = $derived(
+    PIPELINE_STEPS.filter((s) => selectedSteps.has(s.key)).map((s) => s.key),
+  )
+
+  function stepState(key: string): 'idle' | 'running' | 'done' {
+    if (!active || active.status !== 'running' || !active.currentStep) return 'idle'
+    const ci = orderedSelected.indexOf(active.currentStep)
+    const ki = orderedSelected.indexOf(key)
+    if (ci < 0 || ki < 0) return 'idle'
+    if (ki < ci) return 'done'
+    if (ki === ci) return 'running'
+    return 'idle'
+  }
+
+  const curStep = $derived(
+    active?.currentStep ? PIPELINE_STEPS.find((s) => s.key === active.currentStep) : null,
+  )
+
+  // ETA — derived from observed throughput since the task started.
+  let now = $state(Date.now())
+  let startedAt = $state<number | null>(null)
+  let trackedTaskId: number | null = null
+
+  $effect(() => {
+    if (active && active.status === 'running') {
+      if (trackedTaskId !== active.id) {
+        trackedTaskId = active.id
+        startedAt = Date.now()
+      }
+      const t = setInterval(() => (now = Date.now()), 1000)
+      return () => clearInterval(t)
+    }
+    startedAt = null
+    trackedTaskId = null
+  })
+
+  const eta = $derived.by(() => {
+    if (!active || active.status !== 'running' || !startedAt) return null
+    const done = active.completed + active.failed
+    if (done <= 0) return 'estimating…'
+    const per = (now - startedAt) / 1000 / done
+    const secs = Math.round(per * Math.max(0, active.total - done))
+    if (secs <= 0) return 'almost done'
+    if (secs < 60) return `~${secs}s left`
+    const m = Math.floor(secs / 60)
+    const s = secs % 60
+    return `~${m}m${s ? ' ' + s + 's' : ''} left`
+  })
+
   async function run(all: boolean) {
     await store.startBatch([...selectedSteps], all)
   }
 </script>
 
-<div class="flex h-full flex-col gap-4 overflow-auto bg-base p-3 text-sm">
+<div class="flex h-full flex-col gap-5 overflow-auto bg-base p-3 text-sm">
   <section>
-    <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-dim">Steps</h2>
-    <div class="flex flex-col gap-1">
+    <h2 class="eyebrow mb-2">Presets</h2>
+    <div class="grid grid-cols-2 gap-1.5">
+      {#each PRESETS as p (p.key)}
+        <button
+          type="button"
+          onclick={() => applyPreset(p.steps)}
+          class={`rounded-[5px] border px-2.5 py-2 text-left transition-colors duration-[110ms] ${
+            activePreset === p.key
+              ? 'border-brand/50 bg-brand-soft'
+              : 'border-line bg-surface hover:border-[var(--border-strong)] hover:bg-surface-2'
+          }`}
+        >
+          <span
+            class="block text-xs font-medium"
+            style={activePreset === p.key ? 'color: var(--color-brand);' : 'color: var(--color-ink);'}
+          >{p.label}</span>
+          <span class="mt-0.5 block text-[11px] leading-tight text-ink-dim">{p.desc}</span>
+        </button>
+      {/each}
+    </div>
+  </section>
+
+  <section>
+    <div class="mb-2 flex items-center justify-between">
+      <h2 class="eyebrow">Steps</h2>
+      <span class="text-[11px] text-ink-faint">{selectedSteps.size} selected</span>
+    </div>
+    <div class="flex flex-col gap-1.5">
       {#each PIPELINE_STEPS as step (step.key)}
-        <label class="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 hover:bg-surface">
-          <input
-            type="checkbox"
-            checked={selectedSteps.has(step.key)}
-            onchange={() => toggle(step.key)}
-            class="mt-0.5 accent-[var(--color-focus)]"
-          />
-          <span>
-            <span class="text-ink">{step.label}</span>
-            <span class="block text-xs text-ink-dim">{step.hint}</span>
-          </span>
-        </label>
+        <StepCard
+          icon={step.icon}
+          label={step.label}
+          hint={step.hint}
+          model={step.model}
+          selected={selectedSteps.has(step.key)}
+          state={stepState(step.key)}
+          onToggle={() => toggle(step.key)}
+        />
       {/each}
     </div>
   </section>
@@ -50,36 +137,69 @@
       disabled={store.busy || selectedSteps.size === 0 || store.selected.size === 0}
       onclick={() => run(false)}
     >
+      <Icon name="sparkles" size={15} />
       Process selected ({store.selected.size})
     </button>
-    <button
-      class="btn-sm"
-      disabled={store.busy || selectedSteps.size === 0}
-      onclick={() => run(true)}
-    >
+    <button class="btn-sm" disabled={store.busy || selectedSteps.size === 0} onclick={() => run(true)}>
       Process all ({store.total})
     </button>
   </section>
 
   {#if active}
-    <section class="rounded border border-line bg-surface p-3">
-      <div class="mb-2 flex items-center justify-between text-xs">
-        <span class="text-ink">
-          {active.status === 'running' ? 'Processing…' : active.status}
+    <section class="rounded-[8px] border border-line bg-surface p-3 shadow-[var(--shadow-sm)]">
+      <div class="mb-2.5 flex items-center justify-between gap-2">
+        <span class="flex min-w-0 items-center gap-2">
+          {#if active.status === 'running'}
+            <span
+              class="h-3.5 w-3.5 shrink-0 rounded-full border-2"
+              style="border-color: color-mix(in srgb, var(--color-brand) 30%, transparent); border-top-color: var(--color-brand); animation: pa-spin 0.7s linear infinite;"
+            ></span>
+          {/if}
+          <span class="truncate text-ink">
+            {#if active.status === 'running' && curStep}
+              {curStep.label}…
+            {:else if active.status === 'running'}
+              Processing…
+            {:else}
+              {active.status}
+            {/if}
+          </span>
         </span>
-        <span class="text-ink-dim">{active.completed + active.failed} / {active.total}</span>
+        <span class="shrink-0 text-xs tabular-nums text-ink-dim">
+          {active.completed + active.failed} / {active.total}
+        </span>
       </div>
+
       <div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
-        <div class="h-full bg-focus transition-all" style="width: {pct}%"></div>
+        <div class="h-full rounded-full bg-brand transition-[width] duration-[180ms]" style="width: {pct}%"></div>
       </div>
-      {#if active.currentStep}
-        <p class="mt-2 text-xs text-ink-dim">Step: {active.currentStep}</p>
+
+      <div class="mt-2 flex items-center justify-between text-[11px] text-ink-dim">
+        <span>
+          {#if active.failed > 0}
+            <span class="text-danger">{active.failed} failed</span>
+          {:else}
+            {pct}% complete
+          {/if}
+        </span>
+        {#if eta}<span class="tabular-nums">{eta}</span>{/if}
+      </div>
+
+      {#if active.status === 'running' && curStep?.model}
+        <div class="relative mt-2.5 h-1 w-full overflow-hidden rounded-full bg-surface-2">
+          <div
+            class="absolute inset-y-0 w-2/5 rounded-full"
+            style="background: var(--color-info); animation: pa-indeterminate 1.1s ease-in-out infinite;"
+          ></div>
+        </div>
+        <p class="mt-1 flex items-center gap-1.5 text-[11px] text-ink-dim">
+          <Icon name="download" size={12} />
+          Loading {curStep.label} model — downloads on first use.
+        </p>
       {/if}
-      {#if active.failed > 0}
-        <p class="mt-1 text-xs text-red-400">{active.failed} failed</p>
-      {/if}
+
       {#if active.status === 'running'}
-        <button class="btn-sm mt-2 w-full" onclick={() => store.cancelActive()}>Cancel</button>
+        <button class="btn-sm mt-2.5 w-full" onclick={() => store.cancelActive()}>Cancel</button>
       {/if}
     </section>
   {/if}
