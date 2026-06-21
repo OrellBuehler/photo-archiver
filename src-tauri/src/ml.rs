@@ -52,9 +52,9 @@ pub const LAMA: Model = Model {
 pub const ESRGAN: Model = Model {
     key: "realesrgan",
     file: "realesrgan.onnx",
-    url: "https://huggingface.co/Xenova/real-esrgan-x4/resolve/main/onnx/model.onnx",
+    url: "https://huggingface.co/wide-video/real-esrgan-v1.0.0/resolve/main/real_esrgan_x4.onnx",
     label: "Enhance (Real-ESRGAN ×4)",
-    approx_mb: 67,
+    approx_mb: 66,
 };
 
 /// Every model the pipeline can download, in UI display order.
