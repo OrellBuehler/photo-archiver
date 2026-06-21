@@ -1,6 +1,6 @@
 [package]
 name = "photo-archiver"
-version = "0.1.2"
+version = "0.2.0"
 description = "Desktop app for restoring and organizing scanned old photos"
 authors = ["Orell Bühler <me@orellbuehler.ch>"]
 license = "PolyForm-Noncommercial-1.0.0"
