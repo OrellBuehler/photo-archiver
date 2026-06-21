@@ -86,6 +86,22 @@ export type ProgressEvent =
   | { type: 'image_failed'; task_id: number; image_id: number; error: string }
   | { type: 'task_completed'; task_id: number; status: string }
 
+export interface ModelStatus {
+  key: string
+  file: string
+  label: string
+  approx_mb: number
+  downloaded: boolean
+  size_bytes: number | null
+}
+
+export type ModelEvent =
+  | { type: 'started'; key: string; label: string }
+  | { type: 'progress'; key: string; downloaded: number; total: number | null }
+  | { type: 'finished'; key: string }
+  | { type: 'failed'; key: string; error: string }
+  | { type: 'all_done' }
+
 export interface PipelineStep {
   key: string
   label: string
