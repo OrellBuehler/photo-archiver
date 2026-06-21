@@ -102,24 +102,32 @@ export type ModelEvent =
   | { type: 'failed'; key: string; error: string }
   | { type: 'all_done' }
 
+export interface ModelDownload {
+  downloaded: number
+  total: number | null
+  done: boolean
+  error: string | null
+}
+
 export interface PipelineStep {
   key: string
   label: string
   hint: string
   icon: string
   model?: boolean
+  modelKey?: string
 }
 
 export const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'organize', label: 'Organize', hint: 'Copy into year/month folders', icon: 'folderTree' },
   { key: 'orient', label: 'Auto-rotate', hint: 'Apply EXIF orientation', icon: 'rotateSquare' },
   { key: 'crop', label: 'Crop borders', hint: 'Trim white scan borders', icon: 'crop' },
-  { key: 'auto_orient', label: 'Smart orient', hint: 'ML upright detection', icon: 'image', model: true },
+  { key: 'auto_orient', label: 'Smart orient', hint: 'ML upright detection', icon: 'image', model: true, modelKey: 'resnet50' },
   { key: 'deskew', label: 'Deskew', hint: 'Straighten tilted scans', icon: 'scanLine' },
   { key: 'restore_color', label: 'Restore color', hint: 'Fix fading & contrast', icon: 'palette' },
   { key: 'remove_dust', label: 'Remove dust', hint: 'Inpaint specks & scratches', icon: 'sparkles' },
-  { key: 'remove_lines', label: 'Remove scan lines', hint: 'LaMa inpaint', icon: 'layers', model: true },
-  { key: 'enhance', label: 'Enhance', hint: 'Real-ESRGAN upscale', icon: 'wand', model: true },
+  { key: 'remove_lines', label: 'Remove scan lines', hint: 'LaMa inpaint', icon: 'layers', model: true, modelKey: 'lama' },
+  { key: 'enhance', label: 'Enhance', hint: 'Real-ESRGAN upscale', icon: 'wand', model: true, modelKey: 'realesrgan' },
 ]
 
 export interface Preset {

@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { Channel } from '@tauri-apps/api/core'
-  import { downloadModels, listModels, modelsDir } from '../api'
+  import { listModels, modelsDir } from '../api'
   import { store } from '../store.svelte'
-  import type { ModelEvent, ModelStatus } from '../types'
+  import type { ModelDownload, ModelStatus } from '../types'
   import Icon from '../ui/Icon.svelte'
 
   let thumbSize = $state(store.settings?.thumbnail_size ?? 400)
@@ -10,9 +9,6 @@
 
   let models = $state<ModelStatus[]>([])
   let dir = $state('')
-  let downloading = $state(false)
-  type Live = { downloaded: number; total: number | null; done: boolean; error: string | null }
-  let progress = $state<Record<string, Live>>({})
 
   $effect(() => {
     if (store.settings) thumbSize = store.settings.thumbnail_size
@@ -33,39 +29,9 @@
   const missing = $derived(models.filter((m) => !m.downloaded))
 
   async function download() {
-    if (downloading || missing.length === 0) return
-    downloading = true
-    progress = {}
-    const channel = new Channel<ModelEvent>()
-    channel.onmessage = (e) => {
-      switch (e.type) {
-        case 'started':
-          progress = { ...progress, [e.key]: { downloaded: 0, total: null, done: false, error: null } }
-          break
-        case 'progress':
-          progress = {
-            ...progress,
-            [e.key]: { downloaded: e.downloaded, total: e.total, done: false, error: null },
-          }
-          break
-        case 'finished':
-          progress = { ...progress, [e.key]: { ...current(e.key), done: true, error: null } }
-          break
-        case 'failed':
-          progress = { ...progress, [e.key]: { ...current(e.key), done: false, error: e.error } }
-          break
-      }
-    }
-    try {
-      await downloadModels(null, channel)
-    } finally {
-      downloading = false
-      await loadModels()
-    }
-  }
-
-  function current(key: string): Live {
-    return progress[key] ?? { downloaded: 0, total: null, done: false, error: null }
+    if (store.downloadingModels || missing.length === 0) return
+    await store.downloadModelFiles(null)
+    await loadModels()
   }
 
   function sizeLabel(m: ModelStatus): string {
@@ -73,7 +39,7 @@
     return `~${m.approx_mb} MB`
   }
 
-  function pct(p: Live): number {
+  function pct(p: ModelDownload): number {
     if (!p.total) return 0
     return Math.min(100, Math.round((p.downloaded / p.total) * 100))
   }
@@ -125,8 +91,8 @@
   <section class="flex flex-col gap-2">
     <div class="flex items-center justify-between">
       <span class="eyebrow">ML models</span>
-      <button class="btn-sm" onclick={download} disabled={downloading || missing.length === 0}>
-        {#if downloading}
+      <button class="btn-sm" onclick={download} disabled={store.downloadingModels || missing.length === 0}>
+        {#if store.downloadingModels}
           <Icon name="refresh" size={13} class="animate-spin" />
           Downloading…
         {:else if missing.length === 0}
@@ -141,8 +107,8 @@
 
     <div class="flex flex-col divide-y divide-line overflow-hidden rounded-[8px] border border-line bg-surface">
       {#each models as m (m.key)}
-        {@const p = progress[m.key]}
-        {@const active = downloading && p && !p.done && !p.error}
+        {@const p = store.modelProgress[m.key]}
+        {@const active = store.downloadingModels && p && !p.done && !p.error}
         <div class="flex flex-col gap-1.5 p-3">
           <div class="flex items-center justify-between gap-2">
             <span class="font-medium text-ink">{m.label}</span>
