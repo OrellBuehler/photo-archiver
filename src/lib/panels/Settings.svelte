@@ -1,18 +1,81 @@
 <script lang="ts">
+  import { Channel } from '@tauri-apps/api/core'
+  import { downloadModels, listModels, modelsDir } from '../api'
   import { store } from '../store.svelte'
+  import type { ModelEvent, ModelStatus } from '../types'
   import Icon from '../ui/Icon.svelte'
 
   let thumbSize = $state(store.settings?.thumbnail_size ?? 400)
   let saved = $state(false)
 
+  let models = $state<ModelStatus[]>([])
+  let dir = $state('')
+  let downloading = $state(false)
+  type Live = { downloaded: number; total: number | null; done: boolean; error: string | null }
+  let progress = $state<Record<string, Live>>({})
+
   $effect(() => {
     if (store.settings) thumbSize = store.settings.thumbnail_size
   })
+
+  loadModels()
+
+  async function loadModels() {
+    ;[models, dir] = await Promise.all([listModels(), modelsDir()])
+  }
 
   async function saveThumb() {
     await store.setThumbnailSize(Number(thumbSize))
     saved = true
     setTimeout(() => (saved = false), 1500)
+  }
+
+  const missing = $derived(models.filter((m) => !m.downloaded))
+
+  async function download() {
+    if (downloading || missing.length === 0) return
+    downloading = true
+    progress = {}
+    const channel = new Channel<ModelEvent>()
+    channel.onmessage = (e) => {
+      switch (e.type) {
+        case 'started':
+          progress = { ...progress, [e.key]: { downloaded: 0, total: null, done: false, error: null } }
+          break
+        case 'progress':
+          progress = {
+            ...progress,
+            [e.key]: { downloaded: e.downloaded, total: e.total, done: false, error: null },
+          }
+          break
+        case 'finished':
+          progress = { ...progress, [e.key]: { ...current(e.key), done: true, error: null } }
+          break
+        case 'failed':
+          progress = { ...progress, [e.key]: { ...current(e.key), done: false, error: e.error } }
+          break
+      }
+    }
+    try {
+      await downloadModels(null, channel)
+    } finally {
+      downloading = false
+      await loadModels()
+    }
+  }
+
+  function current(key: string): Live {
+    return progress[key] ?? { downloaded: 0, total: null, done: false, error: null }
+  }
+
+  function sizeLabel(m: ModelStatus): string {
+    if (m.downloaded && m.size_bytes != null) return `${Math.round(m.size_bytes / 1e6)} MB`
+    return `~${m.approx_mb} MB`
+  }
+
+  function pct(p: Live): number {
+    if (!p.total) return 0
+    return Math.min(100, Math.round((p.downloaded / p.total) * 100))
   }
 </script>
 
@@ -59,15 +122,74 @@
     </div>
   </section>
 
-  <section class="rounded-[8px] border border-line bg-surface p-3 text-xs text-ink-dim">
-    <p class="mb-1.5 flex items-center gap-1.5 font-medium text-ink">
-      <Icon name="download" size={14} class="text-ink-dim" />
-      ML models
-    </p>
-    <p class="leading-relaxed">
-      Smart-orient, scan-line removal and enhancement run on-device via ONNX
-      Runtime (CPU). Models download on first use into the app data folder.
-      GPU acceleration (CUDA / DirectML) is a build-time option.
+  <section class="flex flex-col gap-2">
+    <div class="flex items-center justify-between">
+      <span class="eyebrow">ML models</span>
+      <button class="btn-sm" onclick={download} disabled={downloading || missing.length === 0}>
+        {#if downloading}
+          <Icon name="refresh" size={13} class="animate-spin" />
+          Downloading…
+        {:else if missing.length === 0}
+          <Icon name="check" size={13} />
+          All downloaded
+        {:else}
+          <Icon name="download" size={13} />
+          Download {missing.length} missing
+        {/if}
+      </button>
+    </div>
+
+    <div class="flex flex-col divide-y divide-line overflow-hidden rounded-[8px] border border-line bg-surface">
+      {#each models as m (m.key)}
+        {@const p = progress[m.key]}
+        {@const active = downloading && p && !p.done && !p.error}
+        <div class="flex flex-col gap-1.5 p-3">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-medium text-ink">{m.label}</span>
+            {#if p?.error}
+              <span class="flex items-center gap-1 text-xs text-danger" title={p.error}>
+                <Icon name="alertTriangle" size={13} />
+                Failed
+              </span>
+            {:else if m.downloaded || p?.done}
+              <span class="flex items-center gap-1 text-xs text-brand">
+                <Icon name="checkCircle" size={13} />
+                {sizeLabel(m)}
+              </span>
+            {:else if active}
+              <span class="font-mono text-xs text-ink-dim">
+                {p.total ? `${pct(p)}%` : `${Math.round(p.downloaded / 1e6)} MB`}
+              </span>
+            {:else}
+              <span class="text-xs text-ink-faint">{sizeLabel(m)} · not downloaded</span>
+            {/if}
+          </div>
+
+          {#if active}
+            <div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+              <div
+                class="h-full rounded-full bg-brand transition-[width] duration-200"
+                class:animate-pulse={!p.total}
+                style="width:{p.total ? pct(p) : 100}%"
+              ></div>
+            </div>
+          {:else if p?.error}
+            <span class="truncate text-xs text-danger" title={p.error}>{p.error}</span>
+          {/if}
+        </div>
+      {/each}
+    </div>
+
+    {#if dir}
+      <code class="truncate rounded-[3px] border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-faint" title={dir}>
+        {dir}
+      </code>
+    {/if}
+
+    <p class="flex items-start gap-1.5 text-xs leading-relaxed text-ink-faint">
+      <Icon name="info" size={13} class="mt-0.5 shrink-0" />
+      Models run on-device via ONNX Runtime (CPU) and download on first use, or
+      pre-fetch them here. GPU acceleration (CUDA / DirectML) is a build-time option.
     </p>
   </section>
 </div>

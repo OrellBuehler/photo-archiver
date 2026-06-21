@@ -7,6 +7,8 @@ import type {
   Image,
   ImageFilters,
   ImageListResponse,
+  ModelEvent,
+  ModelStatus,
   ProgressEvent,
   Task,
 } from './types'
@@ -70,3 +72,9 @@ export const findDuplicates = (threshold: number) =>
 export const pickOutputFolder = () => invoke<AppSettings | null>('pick_output_folder')
 export const updateSettings = (thumbnailSize: number) =>
   invoke<AppSettings>('update_settings', { thumbnailSize })
+
+export const listModels = () => invoke<ModelStatus[]>('list_models')
+export const modelsDir = () => invoke<string>('models_dir')
+export function downloadModels(keys: string[] | null, onEvent: Channel<ModelEvent>) {
+  return invoke<void>('download_models', { keys, onEvent })
+}
