@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { listModels } from '../api'
   import { store } from '../store.svelte'
   import { PIPELINE_STEPS, PRESETS } from '../types'
+  import type { ModelDownload, ModelStatus } from '../types'
   import Icon from '../ui/Icon.svelte'
   import StepCard from '../ui/StepCard.svelte'
 
@@ -82,8 +84,46 @@
     return `~${m}m${s ? ' ' + s + 's' : ''} left`
   })
 
+  // A run is gated if any selected step needs a model that isn't downloaded.
+  let pendingRun = $state<{ all: boolean } | null>(null)
+  let missingModels = $state<ModelStatus[]>([])
+
+  const requiredModelKeys = $derived(
+    PIPELINE_STEPS.filter((s) => s.modelKey && selectedSteps.has(s.key)).map((s) => s.modelKey as string),
+  )
+
   async function run(all: boolean) {
+    if (requiredModelKeys.length > 0) {
+      const statuses = await listModels()
+      const missing = statuses.filter((m) => requiredModelKeys.includes(m.key) && !m.downloaded)
+      if (missing.length > 0) {
+        missingModels = missing
+        pendingRun = { all }
+        return
+      }
+    }
     await store.startBatch([...selectedSteps], all)
+  }
+
+  async function downloadAndRun() {
+    if (!pendingRun) return
+    const ok = await store.downloadModelFiles(missingModels.map((m) => m.key))
+    if (!ok) return // leave the prompt up so the failure stays visible
+    const { all } = pendingRun
+    pendingRun = null
+    await store.startBatch([...selectedSteps], all)
+  }
+
+  async function runAnyway() {
+    if (!pendingRun) return
+    const { all } = pendingRun
+    pendingRun = null
+    await store.startBatch([...selectedSteps], all)
+  }
+
+  function pctOf(p: ModelDownload): number {
+    if (!p.total) return 0
+    return Math.min(100, Math.round((p.downloaded / p.total) * 100))
   }
 </script>
 
@@ -134,16 +174,85 @@
   <section class="flex flex-col gap-2">
     <button
       class="btn"
-      disabled={store.busy || selectedSteps.size === 0 || store.selected.size === 0}
+      disabled={store.busy || store.downloadingModels || selectedSteps.size === 0 || store.selected.size === 0}
       onclick={() => run(false)}
     >
       <Icon name="sparkles" size={15} />
       Process selected ({store.selected.size})
     </button>
-    <button class="btn-sm" disabled={store.busy || selectedSteps.size === 0} onclick={() => run(true)}>
+    <button
+      class="btn-sm"
+      disabled={store.busy || store.downloadingModels || selectedSteps.size === 0}
+      onclick={() => run(true)}
+    >
       Process all ({store.total})
     </button>
   </section>
+
+  {#if pendingRun}
+    <section class="flex flex-col gap-2.5 rounded-[8px] border border-brand/40 bg-brand-soft/40 p-3">
+      <div class="flex items-start gap-2">
+        <Icon name="download" size={15} class="mt-0.5 shrink-0 text-brand" />
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-ink">
+            {missingModels.length} model{missingModels.length > 1 ? 's' : ''} needed for this run
+          </p>
+          <p class="mt-0.5 text-[11px] leading-tight text-ink-dim">
+            Some selected steps use ML models that aren't downloaded yet. Fetch them now, or run
+            anyway and they'll download on first use mid-run.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-1.5">
+        {#each missingModels as m (m.key)}
+          {@const p = store.modelProgress[m.key]}
+          {@const active = store.downloadingModels && p && !p.done && !p.error}
+          <div class="flex flex-col gap-1 rounded-[5px] border border-line bg-surface px-2.5 py-1.5">
+            <div class="flex items-center justify-between gap-2 text-xs">
+              <span class="truncate text-ink">{m.label}</span>
+              {#if p?.error}
+                <span class="flex items-center gap-1 text-danger" title={p.error}>
+                  <Icon name="alertTriangle" size={12} />Failed
+                </span>
+              {:else if p?.done}
+                <span class="flex items-center gap-1 text-brand"><Icon name="checkCircle" size={12} />Ready</span>
+              {:else if active}
+                <span class="font-mono text-ink-dim">
+                  {p.total ? `${pctOf(p)}%` : `${Math.round(p.downloaded / 1e6)} MB`}
+                </span>
+              {:else}
+                <span class="text-ink-faint">~{m.approx_mb} MB</span>
+              {/if}
+            </div>
+            {#if active}
+              <div class="h-1 w-full overflow-hidden rounded-full bg-surface-2">
+                <div
+                  class="h-full rounded-full bg-brand transition-[width] duration-200"
+                  class:animate-pulse={!p.total}
+                  style="width:{p.total ? pctOf(p) : 100}%"
+                ></div>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+
+      <div class="flex gap-1.5">
+        <button class="btn flex-1" disabled={store.downloadingModels} onclick={downloadAndRun}>
+          {#if store.downloadingModels}
+            <Icon name="refresh" size={14} class="animate-spin" />Downloading…
+          {:else}
+            <Icon name="download" size={14} />Download & run
+          {/if}
+        </button>
+        <button class="btn-sm" disabled={store.downloadingModels} onclick={runAnyway}>Run anyway</button>
+        <button class="btn-sm" disabled={store.downloadingModels} onclick={() => (pendingRun = null)}>
+          Cancel
+        </button>
+      </div>
+    </section>
+  {/if}
 
   {#if active}
     <section class="rounded-[8px] border border-line bg-surface p-3 shadow-[var(--shadow-sm)]">

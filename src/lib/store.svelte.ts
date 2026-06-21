@@ -4,6 +4,7 @@ import {
   bulkDelete,
   bulkUpdate,
   cancelTask,
+  downloadModels,
   getSettings,
   imageStats,
   listImages,
@@ -15,7 +16,16 @@ import {
   updateSettings,
 } from './api'
 import { clearThumbCache } from './thumbs'
-import type { AppSettings, FilterCounts, Image, ImageFilters, ProgressEvent, Task } from './types'
+import type {
+  AppSettings,
+  FilterCounts,
+  Image,
+  ImageFilters,
+  ModelDownload,
+  ModelEvent,
+  ProgressEvent,
+  Task,
+} from './types'
 
 const emptyCounts: FilterCounts = {
   years: [],
@@ -54,6 +64,9 @@ class AppStore {
   processingIds = $state<Set<number>>(new Set())
   thumbVersion = $state(0)
   focusedImageId = $state<number | null>(null)
+
+  modelProgress = $state<Record<string, ModelDownload>>({})
+  downloadingModels = $state(false)
 
   // Not reactive — a handle to the dockview workspace for activating panels.
   dockApi: DockviewApi | null = null
@@ -237,6 +250,48 @@ class AppStore {
   async pickOutput() {
     const next = await pickOutputFolder()
     if (next) this.settings = next
+  }
+
+  /// Download the given model keys (or all missing when null), streaming
+  /// progress into `modelProgress`. Returns true if none failed.
+  async downloadModelFiles(keys: string[] | null): Promise<boolean> {
+    if (this.downloadingModels) return false
+    this.downloadingModels = true
+    this.modelProgress = {}
+    let ok = true
+    const prev = (key: string): ModelDownload =>
+      this.modelProgress[key] ?? { downloaded: 0, total: null, done: false, error: null }
+
+    const channel = new Channel<ModelEvent>()
+    channel.onmessage = (e: ModelEvent) => {
+      switch (e.type) {
+        case 'started':
+          this.modelProgress = { ...this.modelProgress, [e.key]: { downloaded: 0, total: null, done: false, error: null } }
+          break
+        case 'progress':
+          this.modelProgress = {
+            ...this.modelProgress,
+            [e.key]: { downloaded: e.downloaded, total: e.total, done: false, error: null },
+          }
+          break
+        case 'finished':
+          this.modelProgress = { ...this.modelProgress, [e.key]: { ...prev(e.key), done: true, error: null } }
+          break
+        case 'failed':
+          ok = false
+          this.modelProgress = { ...this.modelProgress, [e.key]: { ...prev(e.key), done: false, error: e.error } }
+          break
+      }
+    }
+    try {
+      await downloadModels(keys, channel)
+    } catch (e) {
+      ok = false
+      this.error = String(e)
+    } finally {
+      this.downloadingModels = false
+    }
+    return ok
   }
 
   async setThumbnailSize(size: number) {
