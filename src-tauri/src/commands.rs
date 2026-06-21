@@ -4,10 +4,10 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::models::{
     AppSettings, DuplicateGroup, FilterCounts, HistoryRecord, ImageFilters, ImageListResponse,
-    ImageRecord, ProgressEvent, TaskOut,
+    ImageRecord, ModelEvent, ModelStatus, ProgressEvent, TaskOut,
 };
 use crate::state::AppState;
-use crate::{db, hash, imaging, organize, pipeline, scan, thumbnails};
+use crate::{db, hash, imaging, ml, organize, pipeline, scan, thumbnails};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -419,4 +419,30 @@ pub async fn update_settings(
         .await
         .map_err(err)?;
     Ok(state.settings_dto())
+}
+
+// ─── ML models ────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn list_models(state: State<'_, AppState>) -> CmdResult<Vec<ModelStatus>> {
+    Ok(ml::statuses(&state.models_dir()))
+}
+
+#[tauri::command]
+pub async fn models_dir(state: State<'_, AppState>) -> CmdResult<String> {
+    Ok(state.models_dir().to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn download_models(
+    state: State<'_, AppState>,
+    keys: Option<Vec<String>>,
+    on_event: Channel<ModelEvent>,
+) -> CmdResult<()> {
+    let model_dir = state.models_dir();
+    tauri::async_runtime::spawn_blocking(move || {
+        ml::download_models(&model_dir, keys.as_deref(), &on_event);
+    })
+    .await
+    .map_err(err)
 }

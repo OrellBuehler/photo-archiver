@@ -8,59 +8,223 @@
 //! stage and is intentionally not wired here yet.
 
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use image::{imageops::FilterType, GrayImage, Luma, Rgb, RgbImage};
-use ort::execution_providers::CPUExecutionProvider;
+use ort::execution_providers::{CPUExecutionProvider, ExecutionProviderDispatch};
 use ort::inputs;
 use ort::session::Session;
 use ort::value::Tensor;
+use tauri::ipc::Channel;
 
 use crate::imaging::{open_rgb, save_rgb};
+use crate::models::{ModelEvent, ModelStatus};
 
-// Community ONNX exports. Treat as defaults that may need updating after the
-// first validation run.
-const RESNET_URL: &str =
-    "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v1-7.onnx";
-const LAMA_URL: &str = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx";
-const ESRGAN_URL: &str =
-    "https://huggingface.co/Xenova/real-esrgan-x4/resolve/main/onnx/model.onnx";
+/// A downloadable ONNX model. `key` is the stable id the UI/API refer to.
+pub struct Model {
+    pub key: &'static str,
+    pub file: &'static str,
+    pub url: &'static str,
+    pub label: &'static str,
+    pub approx_mb: u32,
+}
 
-static SESSIONS: OnceLock<Mutex<HashMap<String, Session>>> = OnceLock::new();
+// Community ONNX exports. Treat URLs as defaults that may need updating after
+// the first validation run.
+pub const RESNET: Model = Model {
+    key: "resnet50",
+    file: "resnet50.onnx",
+    url: "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-v1-7.onnx",
+    label: "Smart orient (ResNet-50)",
+    approx_mb: 98,
+};
+pub const LAMA: Model = Model {
+    key: "lama",
+    file: "lama.onnx",
+    url: "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx",
+    label: "Scan-line removal (LaMa)",
+    approx_mb: 206,
+};
+pub const ESRGAN: Model = Model {
+    key: "realesrgan",
+    file: "realesrgan.onnx",
+    url: "https://huggingface.co/Xenova/real-esrgan-x4/resolve/main/onnx/model.onnx",
+    label: "Enhance (Real-ESRGAN ×4)",
+    approx_mb: 67,
+};
 
-fn ensure_model(name: &str, url: &str, model_dir: &Path) -> Result<PathBuf> {
-    let path = model_dir.join(name);
-    if !path.exists() {
-        std::fs::create_dir_all(model_dir)?;
-        let resp = ureq::get(url)
-            .call()
-            .map_err(|e| anyhow!("failed to download model {name}: {e}"))?;
-        let mut reader = resp.into_reader();
-        let tmp = path.with_extension("part");
-        let mut file = std::fs::File::create(&tmp)?;
-        std::io::copy(&mut reader, &mut file)?;
-        std::fs::rename(&tmp, &path)?;
+/// Every model the pipeline can download, in UI display order.
+pub const MODELS: &[&Model] = &[&RESNET, &LAMA, &ESRGAN];
+
+static SESSIONS: OnceLock<Mutex<HashMap<&'static str, Session>>> = OnceLock::new();
+// Serialises downloads so two callers never race on the same `.part` file.
+static DOWNLOADS: OnceLock<Mutex<()>> = OnceLock::new();
+
+/// Execution providers tried in order; ORT falls back to the next if one fails
+/// to load. GPU backends are opt-in build features and always fall back to CPU.
+fn execution_providers() -> Vec<ExecutionProviderDispatch> {
+    #[allow(unused_mut)]
+    let mut providers = Vec::new();
+    #[cfg(feature = "cuda")]
+    providers.push(ort::execution_providers::CUDAExecutionProvider::default().build());
+    #[cfg(feature = "directml")]
+    providers.push(ort::execution_providers::DirectMLExecutionProvider::default().build());
+    providers.push(CPUExecutionProvider::default().build());
+    providers
+}
+
+/// Stream `model` to disk if absent, reporting `(downloaded, total)` as it goes.
+/// Writes to a `.part` file and atomically renames only on a complete download.
+fn ensure_model<P: FnMut(u64, Option<u64>)>(
+    model: &Model,
+    model_dir: &Path,
+    mut progress: P,
+) -> Result<PathBuf> {
+    let path = model_dir.join(model.file);
+    if path.exists() {
+        return Ok(path);
     }
+    let _guard = DOWNLOADS.get_or_init(|| Mutex::new(())).lock().unwrap();
+    // Another caller may have finished while we waited for the lock.
+    if path.exists() {
+        return Ok(path);
+    }
+    std::fs::create_dir_all(model_dir)?;
+
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(30))
+        .build();
+    let resp = agent
+        .get(model.url)
+        .call()
+        .map_err(|e| anyhow!("failed to download model {}: {e}", model.file))?;
+    let total = resp
+        .header("Content-Length")
+        .and_then(|v| v.parse::<u64>().ok());
+
+    let tmp = path.with_extension("part");
+    let mut reader = resp.into_reader();
+    let mut file = std::fs::File::create(&tmp)?;
+    let mut buf = [0u8; 64 * 1024];
+    let mut downloaded = 0u64;
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(anyhow!("download of {} interrupted: {e}", model.file));
+            }
+        };
+        if let Err(e) = file.write_all(&buf[..n]) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        downloaded += n as u64;
+        progress(downloaded, total);
+    }
+    file.flush()?;
+    drop(file);
+
+    // A short read against a known length means a truncated download — don't
+    // promote it to the final path, or it would poison every later run.
+    if let Some(t) = total {
+        if downloaded < t {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(anyhow!(
+                "incomplete download for {} ({downloaded}/{t} bytes)",
+                model.file
+            ));
+        }
+    }
+    std::fs::rename(&tmp, &path)?;
     Ok(path)
 }
 
-/// Run `f` with a (lazily created, cached) session for the named model.
-fn with_session<F, R>(name: &str, url: &str, model_dir: &Path, f: F) -> Result<R>
+/// Run `f` with a (lazily created, cached) session for `model`.
+fn with_session<F, R>(model: &Model, model_dir: &Path, f: F) -> Result<R>
 where
     F: FnOnce(&mut Session) -> Result<R>,
 {
+    // Download outside the sessions lock so a slow first fetch doesn't block
+    // inference on already-loaded models.
+    let path = ensure_model(model, model_dir, |_, _| {})?;
     let map = SESSIONS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = map.lock().unwrap();
-    if !guard.contains_key(name) {
-        let path = ensure_model(name, url, model_dir)?;
+    if !guard.contains_key(model.key) {
         let session = Session::builder()?
-            .with_execution_providers([CPUExecutionProvider::default().build()])?
+            .with_execution_providers(execution_providers())?
             .commit_from_file(&path)?;
-        guard.insert(name.to_string(), session);
+        guard.insert(model.key, session);
     }
-    f(guard.get_mut(name).unwrap())
+    f(guard.get_mut(model.key).unwrap())
+}
+
+/// Snapshot of each model's on-disk state for the settings UI.
+pub fn statuses(model_dir: &Path) -> Vec<ModelStatus> {
+    MODELS
+        .iter()
+        .map(|m| {
+            let path = model_dir.join(m.file);
+            let size_bytes = std::fs::metadata(&path).ok().map(|md| md.len());
+            ModelStatus {
+                key: m.key.to_string(),
+                file: m.file.to_string(),
+                label: m.label.to_string(),
+                approx_mb: m.approx_mb,
+                downloaded: path.exists(),
+                size_bytes,
+            }
+        })
+        .collect()
+}
+
+/// Pre-fetch models (all, or those whose key is in `keys`), streaming progress
+/// over `channel`. Already-present models report `Finished` immediately.
+pub fn download_models(model_dir: &Path, keys: Option<&[String]>, channel: &Channel<ModelEvent>) {
+    for model in MODELS {
+        if let Some(keys) = keys {
+            if !keys.iter().any(|k| k == model.key) {
+                continue;
+            }
+        }
+        if model_dir.join(model.file).exists() {
+            let _ = channel.send(ModelEvent::Finished {
+                key: model.key.to_string(),
+            });
+            continue;
+        }
+        let _ = channel.send(ModelEvent::Started {
+            key: model.key.to_string(),
+            label: model.label.to_string(),
+        });
+        let key = model.key.to_string();
+        let result = ensure_model(model, model_dir, |downloaded, total| {
+            let _ = channel.send(ModelEvent::Progress {
+                key: key.clone(),
+                downloaded,
+                total,
+            });
+        });
+        match result {
+            Ok(_) => {
+                let _ = channel.send(ModelEvent::Finished {
+                    key: model.key.to_string(),
+                });
+            }
+            Err(e) => {
+                let _ = channel.send(ModelEvent::Failed {
+                    key: model.key.to_string(),
+                    error: e.to_string(),
+                });
+            }
+        }
+    }
+    let _ = channel.send(ModelEvent::AllDone);
 }
 
 fn rotate_k(img: &RgbImage, k: usize) -> RgbImage {
@@ -105,7 +269,7 @@ pub fn orient(path: &Path, model_dir: &Path) -> Result<bool> {
     for k in 0..4 {
         let rotated = rotate_k(&img, k);
         let data = preprocess_imagenet(&rotated);
-        let conf = with_session("resnet50.onnx", RESNET_URL, model_dir, |s| {
+        let conf = with_session(&RESNET, model_dir, |s| {
             let t = Tensor::from_array((vec![1i64, 3, 224, 224], data))?;
             let out = s.run(inputs![t])?;
             let (_, logits) = out[0].try_extract_tensor::<f32>()?;
@@ -191,7 +355,7 @@ pub fn remove_lines(path: &Path, model_dir: &Path) -> Result<bool> {
         mask_data[i] = if p[0] > 127 { 1.0 } else { 0.0 };
     }
 
-    let out = with_session("lama.onnx", LAMA_URL, model_dir, |s| {
+    let out = with_session(&LAMA, model_dir, |s| {
         let image_t = Tensor::from_array((vec![1i64, 3, th as i64, tw as i64], img_data))?;
         let mask_t = Tensor::from_array((vec![1i64, 1, th as i64, tw as i64], mask_data))?;
         let outputs = s.run(inputs![image_t, mask_t])?;
@@ -250,7 +414,7 @@ pub fn enhance(src: &Path, dest: &Path, model_dir: &Path) -> Result<()> {
         }
     }
 
-    let (out, ow, oh) = with_session("realesrgan.onnx", ESRGAN_URL, model_dir, |s| {
+    let (out, ow, oh) = with_session(&ESRGAN, model_dir, |s| {
         let t = Tensor::from_array((vec![1i64, 3, ih as i64, iw as i64], data))?;
         let outputs = s.run(inputs![t])?;
         let (shape, vals) = outputs[0].try_extract_tensor::<f32>()?;

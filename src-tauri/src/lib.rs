@@ -92,6 +92,9 @@ pub fn run() {
             commands::find_duplicates,
             commands::pick_output_folder,
             commands::update_settings,
+            commands::list_models,
+            commands::models_dir,
+            commands::download_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -123,6 +123,26 @@ pub struct HistoryRecord {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ModelStatus {
+    pub key: String,
+    pub file: String,
+    pub label: String,
+    pub approx_mb: u32,
+    pub downloaded: bool,
+    pub size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ModelEvent {
+    Started { key: String, label: String },
+    Progress { key: String, downloaded: u64, total: Option<u64> },
+    Finished { key: String },
+    Failed { key: String, error: String },
+    AllDone,
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProgressEvent {
     TaskStarted { task_id: i64, total: i64 },

@@ -77,7 +77,7 @@ async fn process_image(
         .await?
         .ok_or_else(|| anyhow!("image not found"))?;
     let mut organized_rel = img.organized_path.clone();
-    let model_dir = state.data_dir.join(".models");
+    let model_dir = state.models_dir();
 
     for &step in STEP_ORDER {
         if !steps.iter().any(|s| s.as_str() == step) {

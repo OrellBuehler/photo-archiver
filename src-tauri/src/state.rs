@@ -60,6 +60,10 @@ impl AppState {
         self.data_dir.join("thumbnails")
     }
 
+    pub fn models_dir(&self) -> PathBuf {
+        self.data_dir.join(".models")
+    }
+
     /// Try to claim the single pipeline slot. Returns false if one is running.
     pub fn try_start(&self, task_id: i64) -> bool {
         if self
