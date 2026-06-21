@@ -25,6 +25,7 @@
 </script>
 
 <Titlebar />
-<StageBar {activePanelId} />
 
 <div bind:this={dockEl} class="min-h-0 flex-1"></div>
+
+<StageBar {activePanelId} />

@@ -1,5 +1,6 @@
 import { Channel } from '@tauri-apps/api/core'
 import type { DockviewApi } from 'dockview-core'
+import { openPanel } from './workspace'
 import {
   bulkDelete,
   bulkUpdate,
@@ -222,11 +223,12 @@ class AppStore {
 
   openImage(id: number) {
     this.focusedImageId = id
-    this.dockApi?.getPanel('viewer')?.api.setActive()
+    this.openPanel('viewer')
   }
 
-  activatePanel(id: string) {
-    this.dockApi?.getPanel(id)?.api.setActive()
+  // Focus a panel (StageBar, titlebar menu), re-creating it if it was closed.
+  openPanel(id: string) {
+    if (this.dockApi) openPanel(this.dockApi, id)
   }
 
   statusCount(value: string) {

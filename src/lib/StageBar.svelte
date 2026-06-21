@@ -29,25 +29,32 @@
   const hasLib = $derived(!!store.settings?.source_dir && store.total > 0)
 </script>
 
-<div class="flex h-10 shrink-0 items-center gap-0.5 border-b border-line bg-base px-2">
+<div class="flex h-10 shrink-0 items-center gap-1 border-t border-line bg-bar px-2 shadow-[var(--shadow-inset)]">
   {#each STAGES as s, i (s.key)}
     {#if i > 0}
-      <Icon name="chevronRight" size={14} class="mx-0.5 text-ink-faint" />
+      <div class="mx-1 h-px w-5 bg-line"></div>
     {/if}
     <button
       type="button"
-      onclick={() => store.activatePanel(s.panel)}
-      class={`flex flex-col items-start gap-px rounded-[5px] border px-3 py-1 transition-colors duration-[110ms] ${
-        activeStage === s.key
-          ? 'border-brand/40 bg-brand-soft'
-          : 'border-transparent hover:bg-surface'
+      onclick={() => store.openPanel(s.panel)}
+      class={`group flex items-center gap-2 rounded-md px-2.5 py-1 transition-colors duration-[110ms] ${
+        activeStage === s.key ? 'bg-brand-soft' : 'hover:bg-surface'
       }`}
     >
       <span
-        class="text-xs font-semibold"
-        style={activeStage === s.key ? 'color: var(--color-brand);' : 'color: var(--color-ink);'}
-      >{s.label}</span>
-      <span class="text-[10px] text-ink-faint">{s.sub}</span>
+        class={`grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold transition-colors ${
+          activeStage === s.key
+            ? 'bg-brand text-white'
+            : 'bg-surface-2 text-ink-faint group-hover:text-ink-dim'
+        }`}
+      >{i + 1}</span>
+      <span class="flex flex-col items-start leading-tight">
+        <span
+          class="text-xs font-semibold"
+          style={activeStage === s.key ? 'color: var(--color-brand);' : 'color: var(--color-ink);'}
+        >{s.label}</span>
+        <span class="text-[10px] text-ink-faint">{s.sub}</span>
+      </span>
     </button>
   {/each}
 

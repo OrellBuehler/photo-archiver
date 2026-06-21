@@ -1,9 +1,31 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { onMount } from 'svelte'
+  import { store } from './store.svelte'
+  import Icon from './ui/Icon.svelte'
 
   const appWindow = getCurrentWindow()
   let maximized = $state(false)
+  let openMenu = $state<string | null>(null)
+
+  // Panels reachable from the View menu (re-creates them if they were closed).
+  const VIEW_ITEMS = [
+    { id: 'library', label: 'Library', icon: 'image' },
+    { id: 'filters', label: 'Filters', icon: 'sliders' },
+    { id: 'processing', label: 'Processing', icon: 'wand' },
+    { id: 'viewer', label: 'Viewer', icon: 'columns' },
+    { id: 'duplicates', label: 'Duplicates', icon: 'copy' },
+    { id: 'tasks', label: 'Tasks', icon: 'listChecks' },
+  ]
+
+  function toggle(menu: string) {
+    openMenu = openMenu === menu ? null : menu
+  }
+
+  function open(id: string) {
+    store.openPanel(id)
+    openMenu = null
+  }
 
   onMount(() => {
     appWindow.isMaximized().then((v) => (maximized = v))
@@ -20,7 +42,7 @@
   class="flex h-8 shrink-0 items-center border-b border-line bg-bar shadow-[var(--shadow-inset)] select-none"
   data-tauri-drag-region
 >
-  <div class="flex items-center gap-2 px-3 text-xs font-medium text-ink-dim" data-tauri-drag-region>
+  <div class="flex items-center gap-2 pr-2 pl-3 text-xs font-medium text-ink-dim" data-tauri-drag-region>
     <svg width="16" height="16" viewBox="0 0 64 64" fill="none" aria-hidden="true">
       <rect x="2" y="2" width="60" height="60" rx="14" fill="#e08a3c" />
       <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#tbg)" fill-opacity="0.18" />
@@ -37,6 +59,49 @@
     </svg>
     Photo Archiver
   </div>
+
+  <!-- VS Code-style window menu -->
+  <nav class="relative flex h-full items-center text-xs text-ink-dim">
+    <button
+      type="button"
+      class={`flex h-6 items-center rounded-[5px] px-2 transition-colors hover:bg-surface-2 hover:text-ink ${openMenu === 'view' ? 'bg-surface-2 text-ink' : ''}`}
+      onclick={() => toggle('view')}
+    >
+      View
+    </button>
+    <button
+      type="button"
+      class="flex h-6 items-center gap-1.5 rounded-[5px] px-2 transition-colors hover:bg-surface-2 hover:text-ink"
+      onclick={() => open('settings')}
+    >
+      <Icon name="settings" size={13} />
+      Settings
+    </button>
+
+    {#if openMenu === 'view'}
+      <!-- click-away backdrop -->
+      <button
+        type="button"
+        class="fixed inset-0 z-40 cursor-default"
+        aria-label="Close menu"
+        onclick={() => (openMenu = null)}
+      ></button>
+      <div
+        class="absolute top-[calc(100%+2px)] left-0 z-50 min-w-44 rounded-md border border-line bg-surface py-1 shadow-[var(--shadow-lg)]"
+      >
+        {#each VIEW_ITEMS as item (item.id)}
+          <button
+            type="button"
+            class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-ink-dim transition-colors hover:bg-surface-2 hover:text-ink"
+            onclick={() => open(item.id)}
+          >
+            <Icon name={item.icon} size={14} class="text-ink-faint" />
+            {item.label}
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </nav>
 
   <div class="ml-auto flex h-full">
     <button
