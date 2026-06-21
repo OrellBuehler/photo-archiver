@@ -121,7 +121,7 @@ export interface PipelineStep {
 export const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'organize', label: 'Organize', hint: 'Copy into year/month folders', icon: 'folderTree' },
   { key: 'orient', label: 'Auto-rotate', hint: 'Apply EXIF orientation', icon: 'rotateSquare' },
-  { key: 'crop', label: 'Crop borders', hint: 'Trim white scan borders', icon: 'crop' },
+  { key: 'crop', label: 'Crop borders', hint: 'Trim blank scan margins', icon: 'crop' },
   { key: 'auto_orient', label: 'Smart orient', hint: 'ML upright detection', icon: 'image', model: true, modelKey: 'resnet50' },
   { key: 'deskew', label: 'Deskew', hint: 'Straighten tilted scans', icon: 'scanLine' },
   { key: 'restore_color', label: 'Restore color', hint: 'Fix fading & contrast', icon: 'palette' },

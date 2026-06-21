@@ -63,40 +63,49 @@ pub fn orient(path: &Path) -> Result<()> {
     save_rgb(&out, path)
 }
 
-// ─── Auto-crop white borders ──────────────────────────────────────────────────
+// ─── Auto-crop blank scan margins (white or dark) ─────────────────────────────
 
 pub fn crop(path: &Path) -> Result<()> {
     let img = open_rgb(path)?;
     let (w, h) = img.dimensions();
-    if w == 0 || h == 0 {
+    if w < 16 || h < 16 {
         return Ok(());
     }
     let gray = image::imageops::grayscale(&img);
     let blurred = imageproc::filter::gaussian_blur_f32(&gray, 1.5);
 
+    // A flatbed margin is either bright (blank paper) or dark (scanner lid).
+    // Read the background from a thin border frame; anything in between is not a
+    // confident margin, so leave the image untouched.
+    let bg = border_median_luma(&blurred);
+    if bg < 190 && bg > 65 {
+        return Ok(());
+    }
+    const TOL: u8 = 28;
+    let white_bg = bg >= 190;
+    let is_content = |v: u8| {
+        if white_bg {
+            v < bg.saturating_sub(TOL)
+        } else {
+            v > bg.saturating_add(TOL)
+        }
+    };
+
     let mut mask = GrayImage::new(w, h);
     for (x, y, p) in blurred.enumerate_pixels() {
-        if p[0] < 240 {
+        if is_content(p[0]) {
             mask.put_pixel(x, y, Luma([255]));
         }
     }
-    // Morphological close (~15x15) to bridge gaps in the content region.
+    // Open drops isolated dust specks in the margin; close (~15x15) bridges gaps
+    // so the photo becomes one solid blob.
+    let mask = imageproc::morphology::open(&mask, Norm::LInf, 2);
     let mask = imageproc::morphology::close(&mask, Norm::LInf, 7);
 
-    let (mut minx, mut miny, mut maxx, mut maxy) = (w, h, 0u32, 0u32);
-    let mut any = false;
-    for (x, y, p) in mask.enumerate_pixels() {
-        if p[0] > 0 {
-            any = true;
-            minx = minx.min(x);
-            miny = miny.min(y);
-            maxx = maxx.max(x);
-            maxy = maxy.max(y);
-        }
-    }
-    if !any {
+    // Crop to the single largest content region (the photo), ignoring stray blobs.
+    let Some((minx, miny, maxx, maxy)) = largest_component_bbox(&mask) else {
         return Ok(());
-    }
+    };
 
     let m = 5i64;
     let x0 = (minx as i64 - m).max(0) as u32;
@@ -107,12 +116,59 @@ pub fn crop(path: &Path) -> Result<()> {
     let ch = y1 - y0 + 1;
 
     let area_ratio = (cw as f64 * ch as f64) / (w as f64 * h as f64);
-    if !(0.10..=0.95).contains(&area_ratio) {
+    if !(0.03..=0.985).contains(&area_ratio) {
         return Ok(());
     }
 
     let cropped = image::imageops::crop_imm(&img, x0, y0, cw, ch).to_image();
     save_rgb(&cropped, path)
+}
+
+/// Median luma of a thin frame around the image edges. The median stays correct
+/// even when the subject touches one or two edges (the corner-scan case).
+fn border_median_luma(gray: &GrayImage) -> u8 {
+    let (w, h) = gray.dimensions();
+    let band = (w.min(h) / 100).max(4);
+    let mut vals: Vec<u8> = Vec::new();
+    for (x, y, p) in gray.enumerate_pixels() {
+        if x < band || y < band || x >= w - band || y >= h - band {
+            vals.push(p[0]);
+        }
+    }
+    if vals.is_empty() {
+        return 255;
+    }
+    vals.sort_unstable();
+    vals[vals.len() / 2]
+}
+
+/// Bounding box `(minx, miny, maxx, maxy)` of the largest 8-connected foreground
+/// component in `mask`, or `None` when the mask is empty.
+fn largest_component_bbox(mask: &GrayImage) -> Option<(u32, u32, u32, u32)> {
+    let labels = connected_components(mask, Connectivity::Eight, Luma([0u8]));
+    let max_label = labels.pixels().map(|p| p[0]).max().unwrap_or(0);
+    if max_label == 0 {
+        return None;
+    }
+    let mut sizes = vec![0u32; (max_label + 1) as usize];
+    for p in labels.pixels() {
+        sizes[p[0] as usize] += 1;
+    }
+    let best = (1..=max_label).max_by_key(|&l| sizes[l as usize])?;
+
+    let (w, h) = mask.dimensions();
+    let (mut minx, mut miny, mut maxx, mut maxy) = (w, h, 0u32, 0u32);
+    let mut any = false;
+    for (x, y, p) in labels.enumerate_pixels() {
+        if p[0] == best {
+            any = true;
+            minx = minx.min(x);
+            miny = miny.min(y);
+            maxx = maxx.max(x);
+            maxy = maxy.max(y);
+        }
+    }
+    any.then_some((minx, miny, maxx, maxy))
 }
 
 // ─── Deskew via Hough lines ───────────────────────────────────────────────────
@@ -590,5 +646,61 @@ mod tests {
         let out = open_rgb(&p).unwrap();
         // Content was 160x110 inside a 200x150 frame; crop should shrink it.
         assert!(out.width() < 200 && out.height() < 150);
+    }
+
+    /// A photo in one corner of a mostly-blank page, with stray dust specks
+    /// scattered across the margin. The old global-bbox crop ballooned to include
+    /// the specks; the largest-component crop must isolate the corner photo.
+    #[test]
+    fn crop_isolates_corner_photo() {
+        let dir = std::env::temp_dir().join("pa_imaging_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("crop_corner.jpg");
+
+        let (w, h) = (400u32, 300u32);
+        let mut img = RgbImage::from_pixel(w, h, Rgb([255, 255, 255]));
+        // 150x120 photo in the top-left corner.
+        for y in 20..140 {
+            for x in 20..170 {
+                img.put_pixel(x, y, Rgb([90, 110, 140]));
+            }
+        }
+        // Stray 6x6 specks far out in the white margin.
+        for &(sx, sy) in &[(388u32, 10u32), (10, 288), (360, 270)] {
+            for y in sy..sy + 6 {
+                for x in sx..sx + 6 {
+                    img.put_pixel(x, y, Rgb([20, 20, 20]));
+                }
+            }
+        }
+        save_rgb(&img, &p).unwrap();
+
+        crop(&p).unwrap();
+        let out = open_rgb(&p).unwrap();
+        // Tight around the ~150x120 photo (+margins), not stretched to the specks.
+        assert!(out.width() > 130 && out.width() < 230, "width {}", out.width());
+        assert!(out.height() > 100 && out.height() < 200, "height {}", out.height());
+    }
+
+    /// Same idea on a dark scanner background: the black margin must be trimmed.
+    #[test]
+    fn crop_trims_black_border() {
+        let dir = std::env::temp_dir().join("pa_imaging_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("crop_black.jpg");
+
+        let (w, h) = (400u32, 300u32);
+        let mut img = RgbImage::from_pixel(w, h, Rgb([0, 0, 0]));
+        for y in 90..210 {
+            for x in 120..280 {
+                img.put_pixel(x, y, Rgb([185, 180, 175]));
+            }
+        }
+        save_rgb(&img, &p).unwrap();
+
+        crop(&p).unwrap();
+        let out = open_rgb(&p).unwrap();
+        assert!(out.width() < 400 && out.height() < 300);
+        assert!(out.width() > 140 && out.height() > 100);
     }
 }
