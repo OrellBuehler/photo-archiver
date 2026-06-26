@@ -619,6 +619,10 @@ fn blend_in(dst: &mut RgbImage, patch: &RgbImage, ox: u32, oy: u32, size: u32) {
 pub fn restore_faces(path: &Path, model_dir: &Path) -> Result<bool> {
     let mut img = open_rgb(path)?;
     let (w, h) = img.dimensions();
+    // Too small to crop a meaningful face from — nothing to do.
+    if w < 16 || h < 16 {
+        return Ok(true);
+    }
     let faces = detect_faces(&img, model_dir)?;
     if faces.is_empty() {
         return Ok(true);

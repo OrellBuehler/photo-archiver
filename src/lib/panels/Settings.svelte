@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { listModels, modelsDir } from '../api'
+  import { listModels, logDir, modelsDir, openLogDir } from '../api'
   import { store } from '../store.svelte'
   import type { ModelDownload, ModelStatus } from '../types'
   import Icon from '../ui/Icon.svelte'
@@ -9,6 +9,7 @@
 
   let models = $state<ModelStatus[]>([])
   let dir = $state('')
+  let logs = $state('')
 
   $effect(() => {
     if (store.settings) thumbSize = store.settings.thumbnail_size
@@ -17,7 +18,7 @@
   loadModels()
 
   async function loadModels() {
-    ;[models, dir] = await Promise.all([listModels(), modelsDir()])
+    ;[models, dir, logs] = await Promise.all([listModels(), modelsDir(), logDir()])
   }
 
   async function saveThumb() {
@@ -156,6 +157,26 @@
       <Icon name="info" size={13} class="mt-0.5 shrink-0" />
       Models run on-device via ONNX Runtime (CPU) and download on first use, or
       pre-fetch them here. GPU acceleration (CUDA / DirectML) is a build-time option.
+    </p>
+  </section>
+
+  <section class="flex flex-col gap-2">
+    <div class="flex items-center justify-between">
+      <span class="eyebrow">Diagnostics</span>
+      <button class="btn-sm" onclick={() => openLogDir()}>
+        <Icon name="folderOpen" size={13} />
+        Open logs folder
+      </button>
+    </div>
+    {#if logs}
+      <code class="truncate rounded-[3px] border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-faint" title={logs}>
+        {logs}
+      </code>
+    {/if}
+    <p class="flex items-start gap-1.5 text-xs leading-relaxed text-ink-faint">
+      <Icon name="info" size={13} class="mt-0.5 shrink-0" />
+      Activity is written to <code class="font-mono">photo-archiver.log</code>. If something
+      goes wrong, open this folder and send us that file.
     </p>
   </section>
 </div>

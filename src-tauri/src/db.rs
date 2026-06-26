@@ -397,6 +397,14 @@ pub async fn set_image_enhanced(pool: &SqlitePool, id: i64, path: &str) -> Resul
     Ok(())
 }
 
+pub async fn clear_image_enhanced(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query("UPDATE images SET enhanced_path = NULL, updated_at = datetime('now') WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn set_image_dimensions(pool: &SqlitePool, id: i64, w: i64, h: i64) -> Result<()> {
     sqlx::query("UPDATE images SET width = ?, height = ?, updated_at = datetime('now') WHERE id = ?")
         .bind(w)

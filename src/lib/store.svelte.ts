@@ -264,11 +264,16 @@ class AppStore {
 
   async rotateSelected(clockwise: boolean) {
     if (this.selected.size === 0) return
-    const n = await bulkRotate([...this.selected], clockwise)
-    clearThumbCache()
-    this.thumbVersion++
-    await this.refresh()
-    return n
+    this.error = null
+    try {
+      const n = await bulkRotate([...this.selected], clockwise)
+      clearThumbCache()
+      this.thumbVersion++
+      await this.refresh()
+      return n
+    } catch (e) {
+      this.error = String(e)
+    }
   }
 
   async setFolderSelected(folder: string | null) {

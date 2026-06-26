@@ -90,6 +90,8 @@ export const updateSettings = (thumbnailSize: number) =>
 
 export const listModels = () => invoke<ModelStatus[]>('list_models')
 export const modelsDir = () => invoke<string>('models_dir')
+export const logDir = () => invoke<string>('log_dir')
+export const openLogDir = () => invoke<void>('open_log_dir')
 export function downloadModels(keys: string[] | null, onEvent: Channel<ModelEvent>) {
   return invoke<void>('download_models', { keys, onEvent })
 }

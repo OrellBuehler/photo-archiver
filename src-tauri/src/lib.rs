@@ -29,12 +29,39 @@ fn ping() -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            use tauri_plugin_log::{Target, TargetKind};
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Info)
+                    // Persist to a rotating file in the OS log dir so users can
+                    // send it for debugging, while still mirroring to stdout.
+                    .max_file_size(5_000_000)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
+                    .targets([
+                        Target::new(TargetKind::Stdout),
+                        Target::new(TargetKind::LogDir {
+                            file_name: Some("photo-archiver".into()),
+                        }),
+                    ])
                     .build(),
             )?;
+
+            // Route panics into the log so crashes are captured in the file too.
+            let default_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                log::error!("panic: {info}");
+                default_hook(info);
+            }));
+
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                log::info!(
+                    "photo-archiver v{} starting; logs at {}",
+                    env!("CARGO_PKG_VERSION"),
+                    log_dir.join("photo-archiver.log").display()
+                );
+            }
 
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
@@ -101,6 +128,8 @@ pub fn run() {
             commands::update_settings,
             commands::list_models,
             commands::models_dir,
+            commands::log_dir,
+            commands::open_log_dir,
             commands::download_models,
         ])
         .run(tauri::generate_context!())

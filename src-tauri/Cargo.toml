@@ -1,6 +1,6 @@
 [package]
 name = "photo-archiver"
-version = "0.2.0"
+version = "0.3.0"
 description = "Desktop app for restoring and organizing scanned old photos"
 authors = ["Orell Bühler <me@orellbuehler.ch>"]
 license = "PolyForm-Noncommercial-1.0.0"
@@ -44,3 +44,4 @@ ort = { version = "=2.0.0-rc.10", features = ["ndarray"] }
 ndarray = "0.17"
 ureq = "3"
 image_hasher = "3"
+tauri-plugin-opener = "2.5.4"

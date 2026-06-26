@@ -22,13 +22,17 @@ pub const STEP_ORDER: &[&str] = &[
 ];
 
 pub fn base_name(img: &ImageRecord) -> String {
-    if let Some(s) = &img.scan_id {
-        return s.clone();
-    }
-    Path::new(&img.filename)
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| img.filename.clone())
+    let stem = if let Some(s) = &img.scan_id {
+        s.clone()
+    } else {
+        Path::new(&img.filename)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| img.filename.clone())
+    };
+    // The id keeps the organized path unique (distinct sources can share a
+    // stem/scan-id now that we ingest many formats) and stable across re-runs.
+    format!("{stem}_{}", img.id)
 }
 
 /// Run a single classical step in place. Returns whether it was handled
@@ -129,6 +133,10 @@ async fn process_image(
                 true
             } else {
                 let abs = output_dir.join(&rel);
+                // Seed a base snapshot of the pre-step state if the stack is
+                // empty (e.g. an image organized before the snapshot feature, or
+                // a step run without re-organizing), so undo can reach it.
+                snapshots::ensure_base(state, img_id, &abs).await?;
                 let abs_for_snap = abs.clone();
                 let step_owned = step.to_string();
                 let md = model_dir.clone();
@@ -182,6 +190,7 @@ pub async fn run(
     let _ = std::fs::create_dir_all(&output_dir);
 
     let total = image_ids.len() as i64;
+    log::info!("task {task_id} starting: {total} image(s), steps {steps:?}");
     db::set_task_status(&state.db, task_id, "running", None).await?;
     let _ = channel.send(ProgressEvent::TaskStarted { task_id, total });
 
@@ -209,6 +218,7 @@ pub async fn run(
             Err(e) => {
                 failed += 1;
                 let msg = e.to_string();
+                log::error!("task {task_id} image {img_id} failed: {msg}");
                 db::set_task_item(&state.db, task_id, img_id, "failed", None, Some(&msg)).await?;
                 let _ = channel.send(ProgressEvent::ImageFailed {
                     task_id,
@@ -227,6 +237,7 @@ pub async fn run(
     }
 
     let status = if cancelled { "cancelled" } else { "completed" };
+    log::info!("task {task_id} {status}: {completed} done, {failed} failed");
     db::set_task_status(&state.db, task_id, status, None).await?;
     let _ = channel.send(ProgressEvent::TaskCompleted {
         task_id,

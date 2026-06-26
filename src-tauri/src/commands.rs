@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use tauri::ipc::{Channel, Response};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::models::{
     AppSettings, DuplicateGroup, FilterCounts, HistoryRecord, ImageFilters, ImageListResponse,
@@ -212,6 +213,18 @@ pub async fn image_history(
 
 // ─── Image mutations ──────────────────────────────────────────────────────────
 
+/// The organized copy was just rewritten, so any enhanced (4× upscale) copy is
+/// stale — drop it (file + DB) and fall the status back to "organized" so the
+/// viewer and thumbnail show the change rather than the old enhanced image.
+async fn drop_stale_enhanced(state: &AppState, img: &ImageRecord) -> CmdResult<()> {
+    if let Some(p) = &img.enhanced_path {
+        let _ = std::fs::remove_file(state.output_dir().join(p));
+        db::clear_image_enhanced(&state.db, img.id).await.map_err(err)?;
+        db::set_image_status(&state.db, img.id, "organized").await.map_err(err)?;
+    }
+    Ok(())
+}
+
 /// Rotate one image's organized copy 90°, snapshotting so it can be undone.
 async fn rotate_one(state: &AppState, id: i64, clockwise: bool) -> CmdResult<()> {
     let img = db::get_image(&state.db, id)
@@ -238,6 +251,8 @@ async fn rotate_one(state: &AppState, id: i64, clockwise: bool) -> CmdResult<()>
             .map_err(err)?
             .map_err(err)?;
             db::set_image_organized(&state.db, id, &r).await.map_err(err)?;
+            // A fresh organized copy resets the undo stack to this base.
+            snapshots::reset(state, id, &output_dir.join(&r)).await.map_err(err)?;
             r
         }
     };
@@ -260,6 +275,7 @@ async fn rotate_one(state: &AppState, id: i64, clockwise: bool) -> CmdResult<()>
     }
     snapshots::record(state, id, step, &abs2).await.map_err(err)?;
     db::add_history(&state.db, id, step).await.map_err(err)?;
+    drop_stale_enhanced(state, &img).await?;
     let _ = std::fs::remove_file(state.thumbnails_dir().join(format!("{id}.jpg")));
     Ok(())
 }
@@ -283,10 +299,14 @@ pub async fn bulk_rotate(
     ids: Vec<i64>,
     clockwise: bool,
 ) -> CmdResult<u64> {
+    // Isolate per-image failures so one unreadable file doesn't abort the batch
+    // and discard the progress already committed to disk.
     let mut n = 0u64;
     for id in ids {
-        rotate_one(state.inner(), id, clockwise).await?;
-        n += 1;
+        match rotate_one(state.inner(), id, clockwise).await {
+            Ok(()) => n += 1,
+            Err(e) => log::warn!("bulk_rotate: image {id} failed: {e}"),
+        }
     }
     Ok(n)
 }
@@ -381,6 +401,7 @@ async fn step_snapshot(state: &AppState, id: i64, forward: bool) -> CmdResult<Im
         db::add_history(&state.db, id, if forward { "redo" } else { "undo" })
             .await
             .map_err(err)?;
+        drop_stale_enhanced(state, &img).await?;
         let _ = std::fs::remove_file(state.thumbnails_dir().join(format!("{id}.jpg")));
     }
 
@@ -546,6 +567,23 @@ pub async fn list_models(state: State<'_, AppState>) -> CmdResult<Vec<ModelStatu
 #[tauri::command]
 pub async fn models_dir(state: State<'_, AppState>) -> CmdResult<String> {
     Ok(state.models_dir().to_string_lossy().into_owned())
+}
+
+// ─── Diagnostics ───────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn log_dir(app: AppHandle) -> CmdResult<String> {
+    let dir = app.path().app_log_dir().map_err(err)?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn open_log_dir(app: AppHandle) -> CmdResult<()> {
+    let dir = app.path().app_log_dir().map_err(err)?;
+    let _ = std::fs::create_dir_all(&dir);
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(err)
 }
 
 #[tauri::command]

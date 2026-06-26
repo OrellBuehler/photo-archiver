@@ -11,6 +11,7 @@
     updateImage,
   } from '../api'
   import { MONTHS, type HistoryItem, type Image, type SnapshotState } from '../types'
+  import { invalidateThumb } from '../thumbs'
   import Icon from '../ui/Icon.svelte'
   import Badge from '../ui/Badge.svelte'
 
@@ -159,23 +160,24 @@
 
   async function undo() {
     if (!image || !canUndo) return
-    image = await undoImage(image.id)
-    await afterMutation()
+    const id = image.id
+    await undoImage(id)
+    afterMutation(id)
   }
 
   async function redo() {
     if (!image || !canRedo) return
-    image = await redoImage(image.id)
-    await afterMutation()
+    const id = image.id
+    await redoImage(id)
+    afterMutation(id)
   }
 
-  // Refresh derived state after a mutation that rewrote the organized file.
-  async function afterMutation() {
-    if (!image) return
+  // After a mutation that rewrote the organized file, invalidate the cached
+  // thumbnail and bump thumbVersion — the loader $effect (which depends on
+  // thumbVersion) then performs the single reload of image/history/variant/snap.
+  function afterMutation(id: number) {
+    invalidateThumb(id)
     store.thumbVersion++
-    history = await imageHistory(image.id)
-    snap = await snapshotState(image.id)
-    await loadVariant()
     store.refresh()
   }
 
@@ -201,8 +203,9 @@
 
   async function rotate(clockwise: boolean) {
     if (!image) return
-    image = await rotateImage(image.id, clockwise)
-    await afterMutation()
+    const id = image.id
+    await rotateImage(id, clockwise)
+    afterMutation(id)
   }
 
   async function save() {
