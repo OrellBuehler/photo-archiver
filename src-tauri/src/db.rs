@@ -64,7 +64,24 @@ CREATE TABLE IF NOT EXISTS image_history (
   step TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS image_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  path TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_image ON image_snapshots(image_id, seq);
 "#;
+
+/// Idempotent column additions for databases created before these columns
+/// existed. SQLite errors on a duplicate column, which we deliberately ignore.
+const MIGRATIONS: &[&str] = &[
+    "ALTER TABLE images ADD COLUMN folder TEXT",
+    "ALTER TABLE images ADD COLUMN history_pos INTEGER NOT NULL DEFAULT 0",
+];
 
 pub async fn init_pool(data_dir: &Path) -> Result<SqlitePool> {
     let db_path = data_dir.join("photo-archiver.db");
@@ -76,6 +93,10 @@ pub async fn init_pool(data_dir: &Path) -> Result<SqlitePool> {
         .connect_with(opts)
         .await?;
     sqlx::query(SCHEMA).execute(&pool).await?;
+    for stmt in MIGRATIONS {
+        // Ignore "duplicate column" on databases that already have the column.
+        let _ = sqlx::query(*stmt).execute(&pool).await;
+    }
     Ok(pool)
 }
 
@@ -109,9 +130,20 @@ fn apply_filters(qb: &mut QueryBuilder<Sqlite>, f: &ImageFilters) {
     if let Some(s) = &f.status {
         qb.push(" AND status = ").push_bind(s.clone());
     }
+    if let Some(folder) = &f.folder {
+        qb.push(" AND folder = ").push_bind(folder.clone());
+    }
     if let Some(step) = &f.step {
         qb.push(" AND EXISTS (SELECT 1 FROM image_history h WHERE h.image_id = images.id AND h.step = ")
             .push_bind(step.clone())
+            .push(")");
+    }
+    if let Some(q) = f.search.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let like = format!("%{}%", q.replace('%', "\\%").replace('_', "\\_"));
+        qb.push(" AND (filename LIKE ").push_bind(like.clone()).push(" ESCAPE '\\'")
+            .push(" OR title LIKE ").push_bind(like.clone()).push(" ESCAPE '\\'")
+            .push(" OR scan_id LIKE ").push_bind(like.clone()).push(" ESCAPE '\\'")
+            .push(" OR source_path LIKE ").push_bind(like).push(" ESCAPE '\\'")
             .push(")");
     }
 }
@@ -195,11 +227,20 @@ pub async fn image_stats(pool: &SqlitePool, f: &ImageFilters) -> Result<FilterCo
     .map(|(s, c)| FilterCountItem { value: s, count: c })
     .collect();
 
+    let folders: Vec<FilterCountItem> = sqlx::query_as::<_, (String, i64)>(
+        "SELECT folder, COUNT(*) FROM images WHERE folder IS NOT NULL AND folder <> '' GROUP BY folder ORDER BY folder",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|(s, c)| FilterCountItem { value: s, count: c })
+    .collect();
+
     let mut total_qb = QueryBuilder::new("SELECT COUNT(*) FROM images");
     apply_filters(&mut total_qb, f);
     let total: i64 = total_qb.build_query_scalar().fetch_one(pool).await?;
 
-    Ok(FilterCounts { years, months, statuses, steps, total })
+    Ok(FilterCounts { years, months, statuses, steps, folders, total })
 }
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
@@ -485,4 +526,117 @@ pub async fn images_with_phash(pool: &SqlitePool) -> Result<Vec<(i64, String)>> 
     )
     .fetch_all(pool)
     .await?)
+}
+
+// ─── Folder / album assignment ─────────────────────────────────────────────────
+
+pub async fn set_folder(pool: &SqlitePool, ids: &[i64], folder: Option<&str>) -> Result<u64> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let mut qb = QueryBuilder::new("UPDATE images SET updated_at = datetime('now'), folder = ");
+    qb.push_bind(folder.map(|s| s.to_string()));
+    qb.push(" WHERE id IN (");
+    let mut sep = qb.separated(", ");
+    for id in ids {
+        sep.push_bind(*id);
+    }
+    qb.push(")");
+    Ok(qb.build().execute(pool).await?.rows_affected())
+}
+
+// ─── Snapshots (undo / redo) ───────────────────────────────────────────────────
+
+pub async fn get_history_pos(pool: &SqlitePool, image_id: i64) -> Result<i64> {
+    Ok(sqlx::query_scalar("SELECT history_pos FROM images WHERE id = ?")
+        .bind(image_id)
+        .fetch_optional(pool)
+        .await?
+        .unwrap_or(0))
+}
+
+pub async fn set_history_pos(pool: &SqlitePool, image_id: i64, pos: i64) -> Result<()> {
+    sqlx::query("UPDATE images SET history_pos = ? WHERE id = ?")
+        .bind(pos)
+        .bind(image_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn add_snapshot(
+    pool: &SqlitePool,
+    image_id: i64,
+    seq: i64,
+    label: &str,
+    path: &str,
+) -> Result<()> {
+    sqlx::query("INSERT INTO image_snapshots (image_id, seq, label, path) VALUES (?, ?, ?, ?)")
+        .bind(image_id)
+        .bind(seq)
+        .bind(label)
+        .bind(path)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn snapshot_path_at(
+    pool: &SqlitePool,
+    image_id: i64,
+    seq: i64,
+) -> Result<Option<String>> {
+    Ok(
+        sqlx::query_scalar("SELECT path FROM image_snapshots WHERE image_id = ? AND seq = ?")
+            .bind(image_id)
+            .bind(seq)
+            .fetch_optional(pool)
+            .await?,
+    )
+}
+
+pub async fn max_snapshot_seq(pool: &SqlitePool, image_id: i64) -> Result<i64> {
+    Ok(sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT MAX(seq) FROM image_snapshots WHERE image_id = ?",
+    )
+    .bind(image_id)
+    .fetch_one(pool)
+    .await?
+    .unwrap_or(-1))
+}
+
+/// Delete snapshot rows with `seq > pos` (the redo branch) and return their
+/// stored paths so the caller can remove the files.
+pub async fn take_snapshots_after(
+    pool: &SqlitePool,
+    image_id: i64,
+    pos: i64,
+) -> Result<Vec<String>> {
+    let paths: Vec<String> = sqlx::query_scalar(
+        "SELECT path FROM image_snapshots WHERE image_id = ? AND seq > ?",
+    )
+    .bind(image_id)
+    .bind(pos)
+    .fetch_all(pool)
+    .await?;
+    sqlx::query("DELETE FROM image_snapshots WHERE image_id = ? AND seq > ?")
+        .bind(image_id)
+        .bind(pos)
+        .execute(pool)
+        .await?;
+    Ok(paths)
+}
+
+/// Delete every snapshot row for an image and return their paths.
+pub async fn take_all_snapshots(pool: &SqlitePool, image_id: i64) -> Result<Vec<String>> {
+    let paths: Vec<String> =
+        sqlx::query_scalar("SELECT path FROM image_snapshots WHERE image_id = ?")
+            .bind(image_id)
+            .fetch_all(pool)
+            .await?;
+    sqlx::query("DELETE FROM image_snapshots WHERE image_id = ?")
+        .bind(image_id)
+        .execute(pool)
+        .await?;
+    Ok(paths)
 }

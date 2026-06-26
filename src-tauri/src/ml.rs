@@ -4,8 +4,9 @@
 //! best documented behaviour of these exports but have NOT been validated at
 //! runtime in this environment. The first real run is the "validation spike":
 //! expect to adjust URLs / normalisation / output scaling per the actual models.
-//! Face restoration (GFPGAN/CodeFormer) additionally needs a face-detection
-//! stage and is intentionally not wired here yet.
+//! Face restoration is wired as SCRFD (detection) → square crop → GFPGAN
+//! (restore) → feathered composite; landmark alignment is approximated by a
+//! centred square crop, which is good enough for scanned snapshots.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -56,9 +57,23 @@ pub const ESRGAN: Model = Model {
     label: "Enhance (Real-ESRGAN ×4)",
     approx_mb: 66,
 };
+pub const SCRFD: Model = Model {
+    key: "scrfd",
+    file: "scrfd.onnx",
+    url: "https://huggingface.co/RuteNL/SCRFD-face-detection-ONNX/resolve/main/2.5g_bnkps.onnx",
+    label: "Face detect (SCRFD)",
+    approx_mb: 4,
+};
+pub const GFPGAN: Model = Model {
+    key: "gfpgan",
+    file: "gfpgan.onnx",
+    url: "https://huggingface.co/facefusion/models-3.0.0/resolve/main/gfpgan_1.4.onnx",
+    label: "Face restore (GFPGAN)",
+    approx_mb: 333,
+};
 
 /// Every model the pipeline can download, in UI display order.
-pub const MODELS: &[&Model] = &[&RESNET, &LAMA, &ESRGAN];
+pub const MODELS: &[&Model] = &[&RESNET, &LAMA, &SCRFD, &GFPGAN, &ESRGAN];
 
 static SESSIONS: OnceLock<Mutex<HashMap<&'static str, Session>>> = OnceLock::new();
 // Serialises downloads so two callers never race on the same `.part` file.
@@ -443,4 +458,197 @@ pub fn enhance(src: &Path, dest: &Path, model_dir: &Path) -> Result<()> {
     }
     save_rgb(&result, dest)?;
     Ok(())
+}
+
+// ─── Face restoration (SCRFD detect → GFPGAN restore) ──────────────────────────
+
+/// A detected face box in original-image pixel coordinates.
+struct Face {
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    score: f32,
+}
+
+fn iou(a: &Face, b: &Face) -> f32 {
+    let xx1 = a.x1.max(b.x1);
+    let yy1 = a.y1.max(b.y1);
+    let xx2 = a.x2.min(b.x2);
+    let yy2 = a.y2.min(b.y2);
+    let inter = (xx2 - xx1).max(0.0) * (yy2 - yy1).max(0.0);
+    let area_a = (a.x2 - a.x1).max(0.0) * (a.y2 - a.y1).max(0.0);
+    let area_b = (b.x2 - b.x1).max(0.0) * (b.y2 - b.y1).max(0.0);
+    let union = area_a + area_b - inter;
+    if union <= 0.0 {
+        0.0
+    } else {
+        inter / union
+    }
+}
+
+fn nms(mut faces: Vec<Face>, iou_thresh: f32) -> Vec<Face> {
+    faces.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    let mut keep: Vec<Face> = Vec::new();
+    'outer: for f in faces {
+        for k in &keep {
+            if iou(&f, k) > iou_thresh {
+                continue 'outer;
+            }
+        }
+        keep.push(f);
+    }
+    keep
+}
+
+/// Detect faces with SCRFD. Letterboxes the image into 640×640 (top-left
+/// aligned), decodes the per-stride score/bbox heads, runs NMS, and maps boxes
+/// back to original coordinates. Reads only the score+bbox outputs so it works
+/// with both the keypoint (9-output) and plain (6-output) SCRFD exports.
+fn detect_faces(img: &RgbImage, model_dir: &Path) -> Result<Vec<Face>> {
+    const INPUT: u32 = 640;
+    const STRIDES: [usize; 3] = [8, 16, 32];
+    const NUM_ANCHORS: usize = 2;
+    const SCORE_THRESH: f32 = 0.5;
+
+    let (w, h) = img.dimensions();
+    let scale = INPUT as f32 / w.max(h).max(1) as f32;
+    let nw = ((w as f32 * scale).round() as u32).clamp(1, INPUT);
+    let nh = ((h as f32 * scale).round() as u32).clamp(1, INPUT);
+    let resized = image::imageops::resize(img, nw, nh, FilterType::Triangle);
+    let mut canvas = RgbImage::from_pixel(INPUT, INPUT, Rgb([0, 0, 0]));
+    image::imageops::overlay(&mut canvas, &resized, 0, 0);
+
+    let hw = (INPUT * INPUT) as usize;
+    let mut data = vec![0f32; 3 * hw];
+    for (i, p) in canvas.pixels().enumerate() {
+        for c in 0..3 {
+            data[c * hw + i] = (p[c] as f32 - 127.5) / 128.0;
+        }
+    }
+
+    let mut faces = with_session(&SCRFD, model_dir, |s| {
+        let t = Tensor::from_array((vec![1i64, 3, INPUT as i64, INPUT as i64], data))?;
+        let out = s.run(inputs![t])?;
+        let mut faces: Vec<Face> = Vec::new();
+        for (si, &stride) in STRIDES.iter().enumerate() {
+            let (_, scores) = out[si].try_extract_tensor::<f32>()?;
+            let (_, bboxes) = out[STRIDES.len() + si].try_extract_tensor::<f32>()?;
+            let grid = INPUT as usize / stride;
+            for i in 0..scores.len() {
+                let sc = scores[i];
+                if sc < SCORE_THRESH {
+                    continue;
+                }
+                let cell = i / NUM_ANCHORS;
+                let cx = (cell % grid) as f32 * stride as f32;
+                let cy = (cell / grid) as f32 * stride as f32;
+                let l = bboxes[i * 4] * stride as f32;
+                let t = bboxes[i * 4 + 1] * stride as f32;
+                let r = bboxes[i * 4 + 2] * stride as f32;
+                let b = bboxes[i * 4 + 3] * stride as f32;
+                faces.push(Face {
+                    x1: cx - l,
+                    y1: cy - t,
+                    x2: cx + r,
+                    y2: cy + b,
+                    score: sc,
+                });
+            }
+        }
+        Ok(faces)
+    })?;
+
+    faces = nms(faces, 0.4);
+    let inv = 1.0 / scale;
+    for f in &mut faces {
+        f.x1 *= inv;
+        f.y1 *= inv;
+        f.x2 *= inv;
+        f.y2 *= inv;
+    }
+    Ok(faces)
+}
+
+/// Restore a 512×512 RGB face crop with GFPGAN. Input/output are normalised to
+/// [-1, 1] (RGB, NCHW), per the canonical ONNX export.
+fn gfpgan_restore(face: &RgbImage, model_dir: &Path) -> Result<RgbImage> {
+    let hw = 512 * 512usize;
+    let mut data = vec![0f32; 3 * hw];
+    for (i, p) in face.pixels().enumerate() {
+        for c in 0..3 {
+            data[c * hw + i] = (p[c] as f32 / 255.0 - 0.5) / 0.5;
+        }
+    }
+    let out = with_session(&GFPGAN, model_dir, |s| {
+        let t = Tensor::from_array((vec![1i64, 3, 512, 512], data))?;
+        let outputs = s.run(inputs![t])?;
+        let (_, vals) = outputs[0].try_extract_tensor::<f32>()?;
+        Ok(vals.to_vec())
+    })?;
+    let denorm = |v: f32| (((v.clamp(-1.0, 1.0) + 1.0) / 2.0) * 255.0).round() as u8;
+    let mut img = RgbImage::new(512, 512);
+    for (i, p) in img.pixels_mut().enumerate() {
+        *p = Rgb([denorm(out[i]), denorm(out[hw + i]), denorm(out[2 * hw + i])]);
+    }
+    Ok(img)
+}
+
+/// Composite `patch` (size×size) into `dst` at `(ox, oy)`, feathering the edges
+/// so restored faces blend into the original photo without a hard seam.
+fn blend_in(dst: &mut RgbImage, patch: &RgbImage, ox: u32, oy: u32, size: u32) {
+    let feather = (size as f32 * 0.12).max(1.0);
+    for j in 0..size {
+        for i in 0..size {
+            let edge = i.min(size - 1 - i).min(j).min(size - 1 - j) as f32;
+            let wgt = (edge / feather).clamp(0.0, 1.0);
+            let o = *dst.get_pixel(ox + i, oy + j);
+            let q = *patch.get_pixel(i, j);
+            let mix = |a: u8, b: u8| (a as f32 * (1.0 - wgt) + b as f32 * wgt).round() as u8;
+            dst.put_pixel(
+                ox + i,
+                oy + j,
+                Rgb([mix(o[0], q[0]), mix(o[1], q[1]), mix(o[2], q[2])]),
+            );
+        }
+    }
+}
+
+/// Detect faces and restore each one in place. A no-op (Ok) when no faces are
+/// found, so it is safe to include in any preset.
+pub fn restore_faces(path: &Path, model_dir: &Path) -> Result<bool> {
+    let mut img = open_rgb(path)?;
+    let (w, h) = img.dimensions();
+    let faces = detect_faces(&img, model_dir)?;
+    if faces.is_empty() {
+        return Ok(true);
+    }
+    let max_side = w.min(h) as i32;
+    for f in faces {
+        let cx = (f.x1 + f.x2) / 2.0;
+        let cy = (f.y1 + f.y2) / 2.0;
+        // Square crop around the face with a 40% margin for context.
+        let side = ((f.x2 - f.x1).max(f.y2 - f.y1) * 1.4).round() as i32;
+        let size = side.clamp(16, max_side);
+        if size < 16 {
+            continue;
+        }
+        let sx = ((cx - size as f32 / 2.0).round() as i32).clamp(0, w as i32 - size) as u32;
+        let sy = ((cy - size as f32 / 2.0).round() as i32).clamp(0, h as i32 - size) as u32;
+        let size = size as u32;
+
+        let crop = image::imageops::crop_imm(&img, sx, sy, size, size).to_image();
+        let face512 = image::imageops::resize(&crop, 512, 512, FilterType::Triangle);
+        let restored512 = match gfpgan_restore(&face512, model_dir) {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("gfpgan restore failed: {e}");
+                continue;
+            }
+        };
+        let restored = image::imageops::resize(&restored512, size, size, FilterType::Triangle);
+        blend_in(&mut img, &restored, sx, sy, size);
+    }
+    save_rgb(&img, path)?;
+    Ok(true)
 }

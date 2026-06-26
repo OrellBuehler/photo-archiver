@@ -5,7 +5,7 @@ use tauri::ipc::Channel;
 
 use crate::models::{ImageRecord, ProgressEvent};
 use crate::state::AppState;
-use crate::{db, imaging, organize};
+use crate::{db, imaging, organize, snapshots};
 
 /// Canonical execution order; requested steps run in this order regardless of input order.
 pub const STEP_ORDER: &[&str] = &[
@@ -17,6 +17,7 @@ pub const STEP_ORDER: &[&str] = &[
     "restore_color",
     "remove_dust",
     "remove_lines",
+    "restore_faces",
     "enhance",
 ];
 
@@ -41,6 +42,7 @@ fn run_step_blocking(step: &str, path: &Path, model_dir: &Path) -> Result<bool> 
         "remove_dust" => imaging::remove_dust(path).map(|_| true),
         "auto_orient" => crate::ml::orient(path, model_dir),
         "remove_lines" => crate::ml::remove_lines(path, model_dir),
+        "restore_faces" => crate::ml::restore_faces(path, model_dir),
         _ => Ok(false),
     }
 }
@@ -53,14 +55,25 @@ async fn do_organize(
 ) -> Result<String> {
     let source_abs = source_dir.join(&img.source_path);
     let source_rel = img.source_path.clone();
-    let output_dir = output_dir.to_path_buf();
+    let out_dir = output_dir.to_path_buf();
     let bn = base_name(img);
+    let album = img.folder.clone();
     let (year, month) = (img.year, img.month);
     let rel = tauri::async_runtime::spawn_blocking(move || {
-        organize::organize(&source_abs, &source_rel, &output_dir, year, month, &bn)
+        organize::organize(
+            &source_abs,
+            &source_rel,
+            &out_dir,
+            album.as_deref(),
+            year,
+            month,
+            &bn,
+        )
     })
     .await??;
     db::set_image_organized(&state.db, img.id, &rel).await?;
+    // Fresh organized copy → reset the undo stack to this as the base state.
+    snapshots::reset(state, img.id, &output_dir.join(&rel)).await?;
     Ok(rel)
 }
 
@@ -116,12 +129,18 @@ async fn process_image(
                 true
             } else {
                 let abs = output_dir.join(&rel);
+                let abs_for_snap = abs.clone();
                 let step_owned = step.to_string();
                 let md = model_dir.clone();
-                tauri::async_runtime::spawn_blocking(move || {
+                let did = tauri::async_runtime::spawn_blocking(move || {
                     run_step_blocking(&step_owned, &abs, &md)
                 })
-                .await??
+                .await??;
+                // Snapshot the new organized state so the step can be undone.
+                if did {
+                    snapshots::record(state, img_id, step, &abs_for_snap).await?;
+                }
+                did
             }
         };
 

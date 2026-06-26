@@ -18,6 +18,16 @@ struct ScannedFile {
     title: Option<String>,
 }
 
+/// Image extensions we ingest. The `image` crate decodes all of these by
+/// default. HEIC/HEIF need a system libheif and are intentionally excluded.
+pub const IMAGE_EXTS: &[&str] = &[
+    "jpg", "jpeg", "png", "tif", "tiff", "webp", "bmp", "gif",
+];
+
+fn is_image_ext(ext: &str) -> bool {
+    IMAGE_EXTS.contains(&ext)
+}
+
 fn scan_id_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"SCAN_\d+").unwrap())
@@ -25,25 +35,33 @@ fn scan_id_re() -> &'static Regex {
 
 fn title_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)SCAN_\d+_(.+)\.jpe?g$").unwrap())
+    // Extension-agnostic: any image extension, not just jpg.
+    RE.get_or_init(|| Regex::new(r"(?i)SCAN_\d+_(.+)\.[A-Za-z0-9]+$").unwrap())
 }
 
-fn month_from_german(s: &str) -> Option<i64> {
-    match s.to_lowercase().as_str() {
-        "januar" => Some(1),
-        "februar" => Some(2),
-        "märz" | "maerz" => Some(3),
-        "april" => Some(4),
-        "mai" => Some(5),
-        "juni" => Some(6),
-        "juli" => Some(7),
-        "august" => Some(8),
-        "september" => Some(9),
-        "oktober" => Some(10),
-        "november" => Some(11),
-        "dezember" => Some(12),
-        _ => None,
+/// Parse a folder/segment into a month number, accepting a numeric value
+/// (`3`, `03`), German names, or English names (full or 3-letter).
+fn parse_month(s: &str) -> Option<i64> {
+    let t = s.trim().to_lowercase();
+    if let Ok(n) = t.parse::<i64>() {
+        return (1..=12).contains(&n).then_some(n);
     }
+    let m = match t.as_str() {
+        "januar" | "january" | "jan" => 1,
+        "februar" | "february" | "feb" => 2,
+        "märz" | "maerz" | "march" | "mar" | "mär" => 3,
+        "april" | "apr" => 4,
+        "mai" | "may" => 5,
+        "juni" | "june" | "jun" => 6,
+        "juli" | "july" | "jul" => 7,
+        "august" | "aug" => 8,
+        "september" | "sep" | "sept" => 9,
+        "oktober" | "october" | "okt" | "oct" => 10,
+        "november" | "nov" => 11,
+        "dezember" | "december" | "dez" | "dec" => 12,
+        _ => return None,
+    };
+    Some(m)
 }
 
 fn collect_files(source_dir: &Path) -> Vec<ScannedFile> {
@@ -57,7 +75,7 @@ fn collect_files(source_dir: &Path) -> Vec<ScannedFile> {
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_lowercase());
-        if !matches!(ext.as_deref(), Some("jpg") | Some("jpeg")) {
+        if !ext.as_deref().map(is_image_ext).unwrap_or(false) {
             continue;
         }
         let Ok(rel) = path.strip_prefix(source_dir) else {
@@ -79,7 +97,7 @@ fn collect_files(source_dir: &Path) -> Vec<ScannedFile> {
             if let Ok(y) = comps[0].parse::<i64>() {
                 year = Some(y);
                 if comps.len() >= 3 {
-                    month = month_from_german(&comps[1]);
+                    month = parse_month(&comps[1]);
                 }
             }
         }

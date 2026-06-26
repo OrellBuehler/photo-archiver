@@ -18,6 +18,8 @@ pub struct ImageRecord {
     pub enhanced_path: Option<String>,
     pub thumbnail_path: Option<String>,
     pub phash: Option<String>,
+    pub folder: Option<String>,
+    pub history_pos: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -29,6 +31,8 @@ pub struct ImageFilters {
     pub month: Option<i64>,
     pub status: Option<String>,
     pub step: Option<String>,
+    pub folder: Option<String>,
+    pub search: Option<String>,
     pub year_unknown: bool,
 }
 
@@ -52,7 +56,15 @@ pub struct FilterCounts {
     pub months: Vec<FilterCountItem>,
     pub statuses: Vec<FilterCountItem>,
     pub steps: Vec<FilterCountItem>,
+    pub folders: Vec<FilterCountItem>,
     pub total: i64,
+}
+
+/// Undo/redo availability for a single image's snapshot stack.
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotState {
+    pub pos: i64,
+    pub max: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

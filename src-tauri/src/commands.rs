@@ -1,13 +1,15 @@
+use std::path::PathBuf;
+
 use tauri::ipc::{Channel, Response};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::models::{
     AppSettings, DuplicateGroup, FilterCounts, HistoryRecord, ImageFilters, ImageListResponse,
-    ImageRecord, ModelEvent, ModelStatus, ProgressEvent, TaskOut,
+    ImageRecord, ModelEvent, ModelStatus, ProgressEvent, SnapshotState, TaskOut,
 };
 use crate::state::AppState;
-use crate::{db, hash, imaging, ml, organize, pipeline, scan, thumbnails};
+use crate::{db, hash, imaging, ml, organize, pipeline, scan, snapshots, thumbnails};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -40,6 +42,28 @@ pub async fn pick_source_folder(
         .await
         .map_err(err)?;
 
+    Ok(Some(state.settings_dto()))
+}
+
+#[tauri::command]
+pub async fn set_source_folder(
+    state: State<'_, AppState>,
+    path: String,
+) -> CmdResult<Option<AppSettings>> {
+    let pb = PathBuf::from(&path);
+    // A dropped file resolves to its containing folder.
+    let dir = if pb.is_dir() {
+        pb
+    } else {
+        pb.parent().map(|p| p.to_path_buf()).filter(|p| p.is_dir()).ok_or("Not a folder")?
+    };
+    {
+        let mut s = state.settings.lock().unwrap();
+        s.source_dir = Some(dir.clone());
+    }
+    db::set_setting(&state.db, "source_dir", &dir.to_string_lossy())
+        .await
+        .map_err(err)?;
     Ok(Some(state.settings_dto()))
 }
 
@@ -188,12 +212,8 @@ pub async fn image_history(
 
 // ─── Image mutations ──────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub async fn rotate_image(
-    state: State<'_, AppState>,
-    id: i64,
-    clockwise: bool,
-) -> CmdResult<ImageRecord> {
+/// Rotate one image's organized copy 90°, snapshotting so it can be undone.
+async fn rotate_one(state: &AppState, id: i64, clockwise: bool) -> CmdResult<()> {
     let img = db::get_image(&state.db, id)
         .await
         .map_err(err)?
@@ -209,9 +229,10 @@ pub async fn rotate_image(
             let source_rel = img.source_path.clone();
             let od = output_dir.clone();
             let bn = pipeline::base_name(&img);
+            let album = img.folder.clone();
             let (year, month) = (img.year, img.month);
             let r = tauri::async_runtime::spawn_blocking(move || {
-                organize::organize(&source_abs, &source_rel, &od, year, month, &bn)
+                organize::organize(&source_abs, &source_rel, &od, album.as_deref(), year, month, &bn)
             })
             .await
             .map_err(err)?
@@ -222,26 +243,52 @@ pub async fn rotate_image(
     };
 
     let abs = output_dir.join(&rel);
+    // Seed a base snapshot of the pre-rotate state if the stack is empty.
+    snapshots::ensure_base(state, id, &abs).await.map_err(err)?;
+
     let abs2 = abs.clone();
     tauri::async_runtime::spawn_blocking(move || imaging::rotate(&abs, clockwise))
         .await
         .map_err(err)?
         .map_err(err)?;
 
+    let step = if clockwise { "rotate_right" } else { "rotate_left" };
     if let Ok((w, h)) = image::image_dimensions(&abs2) {
         db::set_image_dimensions(&state.db, id, w as i64, h as i64)
             .await
             .map_err(err)?;
     }
-    db::add_history(&state.db, id, if clockwise { "rotate_right" } else { "rotate_left" })
-        .await
-        .map_err(err)?;
+    snapshots::record(state, id, step, &abs2).await.map_err(err)?;
+    db::add_history(&state.db, id, step).await.map_err(err)?;
     let _ = std::fs::remove_file(state.thumbnails_dir().join(format!("{id}.jpg")));
+    Ok(())
+}
 
+#[tauri::command]
+pub async fn rotate_image(
+    state: State<'_, AppState>,
+    id: i64,
+    clockwise: bool,
+) -> CmdResult<ImageRecord> {
+    rotate_one(state.inner(), id, clockwise).await?;
     db::get_image(&state.db, id)
         .await
         .map_err(err)?
         .ok_or_else(|| "Image not found".into())
+}
+
+#[tauri::command]
+pub async fn bulk_rotate(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+    clockwise: bool,
+) -> CmdResult<u64> {
+    let mut n = 0u64;
+    for id in ids {
+        rotate_one(state.inner(), id, clockwise).await?;
+        n += 1;
+    }
+    Ok(n)
 }
 
 #[tauri::command]
@@ -288,8 +335,76 @@ pub async fn bulk_delete(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult
             let _ = std::fs::remove_file(output_dir.join(p));
         }
         let _ = std::fs::remove_file(thumbs.join(format!("{}.jpg", r.id)));
+        let _ = std::fs::remove_dir_all(output_dir.join(format!(".snapshots/{}", r.id)));
     }
     db::delete_images(&state.db, &ids).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn set_folder(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+    folder: Option<String>,
+) -> CmdResult<u64> {
+    let f = folder
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    db::set_folder(&state.db, &ids, f.as_deref()).await.map_err(err)
+}
+
+// ─── Undo / redo (snapshot stack) ──────────────────────────────────────────────
+
+async fn step_snapshot(state: &AppState, id: i64, forward: bool) -> CmdResult<ImageRecord> {
+    let img = db::get_image(&state.db, id)
+        .await
+        .map_err(err)?
+        .ok_or("Image not found")?;
+    let rel = img.organized_path.clone().ok_or("Nothing to undo yet")?;
+    let output_dir = state.output_dir();
+    let abs = output_dir.join(&rel);
+
+    let pos = db::get_history_pos(&state.db, id).await.map_err(err)?;
+    let max = db::max_snapshot_seq(&state.db, id).await.map_err(err)?;
+    let target = if forward { pos + 1 } else { pos - 1 };
+    if target < 0 || target > max {
+        // Nothing to do — return the unchanged record.
+        return Ok(img);
+    }
+
+    if snapshots::restore_to(state, id, target, &abs).await.map_err(err)? {
+        db::set_history_pos(&state.db, id, target).await.map_err(err)?;
+        if let Ok((w, h)) = image::image_dimensions(&abs) {
+            db::set_image_dimensions(&state.db, id, w as i64, h as i64)
+                .await
+                .map_err(err)?;
+        }
+        db::add_history(&state.db, id, if forward { "redo" } else { "undo" })
+            .await
+            .map_err(err)?;
+        let _ = std::fs::remove_file(state.thumbnails_dir().join(format!("{id}.jpg")));
+    }
+
+    db::get_image(&state.db, id)
+        .await
+        .map_err(err)?
+        .ok_or_else(|| "Image not found".into())
+}
+
+#[tauri::command]
+pub async fn undo_image(state: State<'_, AppState>, id: i64) -> CmdResult<ImageRecord> {
+    step_snapshot(state.inner(), id, false).await
+}
+
+#[tauri::command]
+pub async fn redo_image(state: State<'_, AppState>, id: i64) -> CmdResult<ImageRecord> {
+    step_snapshot(state.inner(), id, true).await
+}
+
+#[tauri::command]
+pub async fn snapshot_state(state: State<'_, AppState>, id: i64) -> CmdResult<SnapshotState> {
+    let pos = db::get_history_pos(&state.db, id).await.map_err(err)?;
+    let max = db::max_snapshot_seq(&state.db, id).await.map_err(err)?;
+    Ok(SnapshotState { pos, max })
 }
 
 #[tauri::command]

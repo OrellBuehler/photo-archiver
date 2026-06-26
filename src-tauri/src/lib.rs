@@ -8,6 +8,7 @@ mod models;
 mod organize;
 mod pipeline;
 mod scan;
+mod snapshots;
 mod state;
 mod thumbnails;
 
@@ -73,6 +74,7 @@ pub fn run() {
             ping,
             commands::get_settings,
             commands::pick_source_folder,
+            commands::set_source_folder,
             commands::scan_source,
             commands::list_images,
             commands::image_stats,
@@ -84,9 +86,14 @@ pub fn run() {
             commands::get_task,
             commands::image_history,
             commands::rotate_image,
+            commands::bulk_rotate,
             commands::update_image,
             commands::bulk_update,
             commands::bulk_delete,
+            commands::set_folder,
+            commands::undo_image,
+            commands::redo_image,
+            commands::snapshot_state,
             commands::get_variant,
             commands::scan_duplicates,
             commands::find_duplicates,
