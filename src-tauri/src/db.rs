@@ -96,7 +96,7 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()
     Ok(())
 }
 
-fn apply_filters(qb: &mut QueryBuilder<'_, Sqlite>, f: &ImageFilters) {
+fn apply_filters(qb: &mut QueryBuilder<Sqlite>, f: &ImageFilters) {
     qb.push(" WHERE 1 = 1");
     if f.year_unknown {
         qb.push(" AND year IS NULL");

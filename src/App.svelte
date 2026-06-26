@@ -14,8 +14,8 @@
     api = createWorkspace(dockEl)
     store.dockApi = api
     store.init()
-    const sub = api.onDidActivePanelChange((p) => {
-      if (p?.id) activePanelId = p.id
+    const sub = api.onDidActivePanelChange((e) => {
+      if (e.panel?.id) activePanelId = e.panel.id
     })
     return () => {
       sub.dispose()

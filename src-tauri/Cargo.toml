@@ -37,7 +37,10 @@ regex = "1"
 anyhow = "1"
 kamadak-exif = "0.6"
 little_exif = "0.6"
-ort = { version = "=2.0.0-rc.12", features = ["ndarray"] }
+# Pinned to rc.10: rc.11+ ship a prebuilt libonnxruntime built against
+# glibc 2.38+ (references __isoc23_*), which won't link on the glibc 2.35
+# target (ubuntu-22.04 CI / WSL). Revisit when bumping the CI base image.
+ort = { version = "=2.0.0-rc.10", features = ["ndarray"] }
 ndarray = "0.17"
 ureq = "3"
 image_hasher = "3"

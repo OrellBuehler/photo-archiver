@@ -95,19 +95,22 @@ fn ensure_model<P: FnMut(u64, Option<u64>)>(
     }
     std::fs::create_dir_all(model_dir)?;
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(30))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .build()
+        .into();
     let resp = agent
         .get(model.url)
         .call()
         .map_err(|e| anyhow!("failed to download model {}: {e}", model.file))?;
     let total = resp
-        .header("Content-Length")
+        .headers()
+        .get("Content-Length")
+        .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<u64>().ok());
 
     let tmp = path.with_extension("part");
-    let mut reader = resp.into_reader();
+    let mut reader = resp.into_body().into_reader();
     let mut file = std::fs::File::create(&tmp)?;
     let mut buf = [0u8; 64 * 1024];
     let mut downloaded = 0u64;
@@ -157,7 +160,8 @@ where
     let mut guard = map.lock().unwrap();
     if !guard.contains_key(model.key) {
         let session = Session::builder()?
-            .with_execution_providers(execution_providers())?
+            .with_execution_providers(execution_providers())
+            .map_err(|e| anyhow!("{e}"))?
             .commit_from_file(&path)?;
         guard.insert(model.key, session);
     }

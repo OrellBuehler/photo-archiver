@@ -4,7 +4,7 @@ use anyhow::Result;
 use image::codecs::jpeg::JpegEncoder;
 use image::{ExtendedColorType, GrayImage, ImageEncoder, ImageReader, Luma, Rgb, RgbImage};
 use imageproc::distance_transform::Norm;
-use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
+use imageproc::geometric_transformations::{rotate_about_center, Border, Interpolation};
 use imageproc::region_labelling::{connected_components, Connectivity};
 
 const JPEG_QUALITY: u8 = 97;
@@ -212,7 +212,12 @@ pub fn deskew(path: &Path) -> Result<()> {
     }
 
     let theta = (median * std::f64::consts::PI / 180.0) as f32;
-    let rotated = rotate_about_center(&img, -theta, Interpolation::Bilinear, Rgb([0, 0, 0]));
+    let rotated = rotate_about_center(
+        &img,
+        -theta,
+        Interpolation::Bilinear,
+        Border::Constant(Rgb([0, 0, 0])),
+    );
 
     let (rw, rh) = largest_rotated_rect(w as f64, h as f64, median.to_radians().abs());
     let rw = (rw.floor() as u32).min(w);
