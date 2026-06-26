@@ -37,7 +37,7 @@ regex = "1"
 anyhow = "1"
 kamadak-exif = "0.6"
 little_exif = "0.6"
-ort = { version = "=2.0.0-rc.10", features = ["ndarray"] }
+ort = { version = "=2.0.0-rc.12", features = ["ndarray"] }
 ndarray = "0.17"
 ureq = "2"
 image_hasher = "3"
