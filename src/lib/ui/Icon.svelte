@@ -45,6 +45,12 @@
     flag: 'M4 22V4a1 1 0 0 1 1-1h13l-3 5 3 5H5M4 4v18',
     layers: 'M12 2 2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
     trash: 'M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M5 6l1 14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-14',
+    user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2|c12 7 4',
+    undo: 'M9 14 4 9l5-5M4 9h11a4 4 0 0 1 0 8h-4',
+    redo: 'M15 14l5-5-5-5M20 9H9a4 4 0 0 0 0 8h4',
+    zoomIn: 'M21 21l-4.3-4.3M11 8v6M8 11h6|c11 11 8',
+    zoomOut: 'M21 21l-4.3-4.3M8 11h6|c11 11 8',
+    maximize: 'M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3',
   }
 
   type Segment = { kind: 'path'; d: string } | { kind: 'circle'; cx: string; cy: string; r: string }

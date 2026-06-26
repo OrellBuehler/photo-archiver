@@ -1,7 +1,16 @@
 <script lang="ts">
   import { store } from '../store.svelte'
-  import { getImage, getVariant, imageHistory, rotateImage, updateImage } from '../api'
-  import { MONTHS, type HistoryItem, type Image } from '../types'
+  import {
+    getImage,
+    getVariant,
+    imageHistory,
+    redoImage,
+    rotateImage,
+    snapshotState,
+    undoImage,
+    updateImage,
+  } from '../api'
+  import { MONTHS, type HistoryItem, type Image, type SnapshotState } from '../types'
   import Icon from '../ui/Icon.svelte'
   import Badge from '../ui/Badge.svelte'
 
@@ -16,6 +25,23 @@
   let split = $state(50)
   let editing = $state(false)
   let form = $state({ year: '', month: '', title: '' })
+  let snap = $state<SnapshotState>({ pos: 0, max: 0 })
+
+  // Zoom / pan for the single-image view (disabled while comparing).
+  let scale = $state(1)
+  let tx = $state(0)
+  let ty = $state(0)
+  let panning = $state(false)
+  let panStart = { x: 0, y: 0 }
+
+  const canUndo = $derived(snap.pos > 0)
+  const canRedo = $derived(snap.pos < snap.max)
+
+  function resetZoom() {
+    scale = 1
+    tx = 0
+    ty = 0
+  }
 
   let stageEl = $state<HTMLDivElement>()
   let dragging = false
@@ -69,8 +95,17 @@
   }
 
   $effect(() => {
-    const move = (e: MouseEvent) => dragging && setFromClientX(e.clientX)
-    const up = () => (dragging = false)
+    const move = (e: MouseEvent) => {
+      if (dragging) setFromClientX(e.clientX)
+      else if (panning) {
+        tx = e.clientX - panStart.x
+        ty = e.clientY - panStart.y
+      }
+    }
+    const up = () => {
+      dragging = false
+      panning = false
+    }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
     return () => {
@@ -78,6 +113,32 @@
       window.removeEventListener('mouseup', up)
     }
   })
+
+  function onWheel(e: WheelEvent) {
+    if (comparing || !stageEl) return
+    e.preventDefault()
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+    const next = Math.min(8, Math.max(1, scale * factor))
+    const r = stageEl.getBoundingClientRect()
+    const cx = e.clientX - r.left - r.width / 2
+    const cy = e.clientY - r.top - r.height / 2
+    // Keep the point under the cursor anchored as we scale.
+    tx = cx - (cx - tx) * (next / scale)
+    ty = cy - (cy - ty) * (next / scale)
+    scale = next
+    if (scale === 1) {
+      tx = 0
+      ty = 0
+    }
+  }
+
+  function zoomBy(factor: number) {
+    scale = Math.min(8, Math.max(1, scale * factor))
+    if (scale === 1) {
+      tx = 0
+      ty = 0
+    }
+  }
 
   async function load(id: number) {
     image = await getImage(id)
@@ -91,7 +152,31 @@
     variant = image.enhanced_path ? 'enhanced' : image.organized_path ? 'organized' : 'source'
     comparing = false
     split = 50
+    resetZoom()
+    snap = await snapshotState(id)
     await loadVariant()
+  }
+
+  async function undo() {
+    if (!image || !canUndo) return
+    image = await undoImage(image.id)
+    await afterMutation()
+  }
+
+  async function redo() {
+    if (!image || !canRedo) return
+    image = await redoImage(image.id)
+    await afterMutation()
+  }
+
+  // Refresh derived state after a mutation that rewrote the organized file.
+  async function afterMutation() {
+    if (!image) return
+    store.thumbVersion++
+    history = await imageHistory(image.id)
+    snap = await snapshotState(image.id)
+    await loadVariant()
+    store.refresh()
   }
 
   async function loadVariant() {
@@ -117,8 +202,7 @@
   async function rotate(clockwise: boolean) {
     if (!image) return
     image = await rotateImage(image.id, clockwise)
-    store.thumbVersion++
-    await loadVariant()
+    await afterMutation()
   }
 
   async function save() {
@@ -160,6 +244,23 @@
             Compare
           </button>
         {/if}
+        {#if !comparing}
+          <button class="btn-sm" title="Zoom out" aria-label="Zoom out" disabled={scale <= 1} onclick={() => zoomBy(1 / 1.3)}>
+            <Icon name="zoomOut" size={14} />
+          </button>
+          <button class="btn-sm" title="Fit" aria-label="Fit to view" disabled={scale === 1} onclick={resetZoom}>
+            <span class="tabular-nums">{Math.round(scale * 100)}%</span>
+          </button>
+          <button class="btn-sm" title="Zoom in" aria-label="Zoom in" disabled={scale >= 8} onclick={() => zoomBy(1.3)}>
+            <Icon name="zoomIn" size={14} />
+          </button>
+        {/if}
+        <button class="btn-sm" title="Undo" aria-label="Undo" disabled={!canUndo} onclick={undo}>
+          <Icon name="undo" size={14} />
+        </button>
+        <button class="btn-sm" title="Redo" aria-label="Redo" disabled={!canRedo} onclick={redo}>
+          <Icon name="redo" size={14} />
+        </button>
         <button class="btn-sm" title="Rotate left" aria-label="Rotate left" onclick={() => rotate(false)}>
           <Icon name="rotateCcw" size={14} />
         </button>
@@ -182,10 +283,16 @@
       bind:this={stageEl}
       class="relative min-h-0 flex-1 overflow-hidden bg-black"
       class:cursor-ew-resize={comparing && compareUrl}
+      class:cursor-grab={!comparing && scale > 1 && !panning}
+      class:cursor-grabbing={!comparing && panning}
+      onwheel={onWheel}
       onmousedown={(e) => {
         if (comparing && compareUrl) {
           dragging = true
           setFromClientX(e.clientX)
+        } else if (scale > 1) {
+          panning = true
+          panStart = { x: e.clientX - tx, y: e.clientY - ty }
         }
       }}
       role="presentation"
@@ -220,7 +327,13 @@
           </span>
         </div>
       {:else if url}
-        <img src={url} alt={variant} class="absolute inset-0 h-full w-full object-contain" />
+        <img
+          src={url}
+          alt={variant}
+          draggable="false"
+          class="absolute inset-0 h-full w-full select-none object-contain"
+          style="transform: translate({tx}px, {ty}px) scale({scale}); transition: {panning ? 'none' : 'transform 120ms ease-out'};"
+        />
       {/if}
     </div>
 

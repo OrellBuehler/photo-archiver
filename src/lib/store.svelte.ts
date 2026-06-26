@@ -3,6 +3,7 @@ import type { DockviewApi } from 'dockview-core'
 import { openPanel } from './workspace'
 import {
   bulkDelete,
+  bulkRotate,
   bulkUpdate,
   cancelTask,
   downloadModels,
@@ -13,6 +14,8 @@ import {
   pickOutputFolder,
   pickSourceFolder,
   scanSource,
+  setFolder,
+  setSourceFolder,
   startBatch,
   updateSettings,
 } from './api'
@@ -33,6 +36,7 @@ const emptyCounts: FilterCounts = {
   months: [],
   statuses: [],
   steps: [],
+  folders: [],
   total: 0,
 }
 
@@ -133,6 +137,15 @@ class AppStore {
     this.filters = { ...this.filters, ...patch }
     this.page = 1
     this.refresh()
+  }
+
+  private searchTimer: ReturnType<typeof setTimeout> | undefined
+  // Debounced free-text search so we don't refetch on every keystroke.
+  setSearch(q: string) {
+    this.filters = { ...this.filters, search: q }
+    this.page = 1
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    this.searchTimer = setTimeout(() => this.refresh(), 250)
   }
 
   clearFilters() {
@@ -247,6 +260,36 @@ class AppStore {
     if (this.selected.size === 0) return
     await bulkUpdate([...this.selected], year, month, title)
     await this.refresh()
+  }
+
+  async rotateSelected(clockwise: boolean) {
+    if (this.selected.size === 0) return
+    const n = await bulkRotate([...this.selected], clockwise)
+    clearThumbCache()
+    this.thumbVersion++
+    await this.refresh()
+    return n
+  }
+
+  async setFolderSelected(folder: string | null) {
+    if (this.selected.size === 0) return
+    await setFolder([...this.selected], folder)
+    this.clearSelection()
+    await this.refresh()
+  }
+
+  // Set the source folder from a dropped path (drag-and-drop), then scan it.
+  async setSourcePath(path: string) {
+    this.error = null
+    try {
+      const next = await setSourceFolder(path)
+      if (next) {
+        this.settings = next
+        await this.scan()
+      }
+    } catch (e) {
+      this.error = String(e)
+    }
   }
 
   async pickOutput() {

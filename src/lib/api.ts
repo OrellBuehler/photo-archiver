@@ -10,6 +10,7 @@ import type {
   ModelEvent,
   ModelStatus,
   ProgressEvent,
+  SnapshotState,
   Task,
 } from './types'
 
@@ -17,6 +18,9 @@ export const getSettings = () => invoke<AppSettings>('get_settings')
 
 export const pickSourceFolder = () =>
   invoke<AppSettings | null>('pick_source_folder')
+
+export const setSourceFolder = (path: string) =>
+  invoke<AppSettings | null>('set_source_folder', { path })
 
 export const scanSource = () => invoke<number>('scan_source')
 
@@ -44,6 +48,17 @@ export const imageHistory = (id: number) => invoke<HistoryItem[]>('image_history
 
 export const rotateImage = (id: number, clockwise: boolean) =>
   invoke<Image>('rotate_image', { id, clockwise })
+
+export const bulkRotate = (ids: number[], clockwise: boolean) =>
+  invoke<number>('bulk_rotate', { ids, clockwise })
+
+export const setFolder = (ids: number[], folder: string | null) =>
+  invoke<number>('set_folder', { ids, folder })
+
+export const undoImage = (id: number) => invoke<Image>('undo_image', { id })
+export const redoImage = (id: number) => invoke<Image>('redo_image', { id })
+export const snapshotState = (id: number) =>
+  invoke<SnapshotState>('snapshot_state', { id })
 
 export const updateImage = (
   id: number,

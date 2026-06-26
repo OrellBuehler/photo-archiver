@@ -14,6 +14,8 @@ export interface Image {
   enhanced_path: string | null
   thumbnail_path: string | null
   phash: string | null
+  folder: string | null
+  history_pos: number
   created_at: string
   updated_at: string
 }
@@ -23,7 +25,14 @@ export interface ImageFilters {
   month?: number | null
   status?: string | null
   step?: string | null
+  folder?: string | null
+  search?: string | null
   year_unknown: boolean
+}
+
+export interface SnapshotState {
+  pos: number
+  max: number
 }
 
 export interface ImageListResponse {
@@ -43,6 +52,7 @@ export interface FilterCounts {
   months: FilterCountItem[]
   statuses: FilterCountItem[]
   steps: FilterCountItem[]
+  folders: FilterCountItem[]
   total: number
 }
 
@@ -116,6 +126,7 @@ export interface PipelineStep {
   icon: string
   model?: boolean
   modelKey?: string
+  modelKeys?: string[]
 }
 
 export const PIPELINE_STEPS: PipelineStep[] = [
@@ -127,8 +138,14 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'restore_color', label: 'Restore color', hint: 'Fix fading & contrast', icon: 'palette' },
   { key: 'remove_dust', label: 'Remove dust', hint: 'Inpaint specks & scratches', icon: 'sparkles' },
   { key: 'remove_lines', label: 'Remove scan lines', hint: 'LaMa inpaint', icon: 'layers', model: true, modelKey: 'lama' },
+  { key: 'restore_faces', label: 'Restore faces', hint: 'Detect & restore faces (GFPGAN)', icon: 'user', model: true, modelKeys: ['scrfd', 'gfpgan'] },
   { key: 'enhance', label: 'Enhance', hint: 'Real-ESRGAN upscale', icon: 'wand', model: true, modelKey: 'realesrgan' },
 ]
+
+/// The model keys a step needs downloaded before it can run.
+export function stepModelKeys(s: PipelineStep): string[] {
+  return s.modelKeys ?? (s.modelKey ? [s.modelKey] : [])
+}
 
 export interface Preset {
   key: string

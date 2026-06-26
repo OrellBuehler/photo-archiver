@@ -5,8 +5,17 @@
 
   const f = $derived(store.filters)
   const hasActive = $derived(
-    f.year != null || f.month != null || f.status != null || f.year_unknown,
+    f.year != null ||
+      f.month != null ||
+      f.status != null ||
+      f.folder != null ||
+      f.year_unknown ||
+      !!f.search,
   )
+
+  function pickFolder(value: string) {
+    store.setFilter({ folder: f.folder === value ? null : value })
+  }
 
   function pickYear(value: string) {
     if (value === 'unknown') {
@@ -42,6 +51,30 @@
       </button>
     {/if}
   </div>
+
+  <div class="relative">
+    <Icon name="search" size={14} class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint" />
+    <input
+      class="input pl-7"
+      placeholder="Search filename or title…"
+      value={f.search ?? ''}
+      oninput={(e) => store.setSearch((e.currentTarget as HTMLInputElement).value)}
+    />
+  </div>
+
+  {#if store.counts.folders.length}
+    <section>
+      <h3 class="eyebrow mb-2">Folder</h3>
+      <div class="flex flex-wrap gap-1.5">
+        {#each store.counts.folders as fl (fl.value)}
+          <button class="pill" class:pill-active={f.folder === fl.value} onclick={() => pickFolder(fl.value)}>
+            {fl.value}
+            <span class="opacity-60">{fl.count}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   {#if store.counts.years.length}
     <section>

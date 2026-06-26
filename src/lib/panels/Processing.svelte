@@ -1,7 +1,7 @@
 <script lang="ts">
   import { listModels } from '../api'
   import { store } from '../store.svelte'
-  import { PIPELINE_STEPS, PRESETS } from '../types'
+  import { PIPELINE_STEPS, PRESETS, stepModelKeys } from '../types'
   import type { ModelDownload, ModelStatus } from '../types'
   import Icon from '../ui/Icon.svelte'
   import StepCard from '../ui/StepCard.svelte'
@@ -89,7 +89,7 @@
   let missingModels = $state<ModelStatus[]>([])
 
   const requiredModelKeys = $derived(
-    PIPELINE_STEPS.filter((s) => s.modelKey && selectedSteps.has(s.key)).map((s) => s.modelKey as string),
+    PIPELINE_STEPS.filter((s) => selectedSteps.has(s.key)).flatMap(stepModelKeys),
   )
 
   async function run(all: boolean) {
