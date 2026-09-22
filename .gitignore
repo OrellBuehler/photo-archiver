@@ -19,3 +19,4 @@ src-tauri/gen/schemas/
 
 # Editor / tooling
 .playwright-mcp/
+.svelte-check

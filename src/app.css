@@ -2,7 +2,6 @@
    headline). Added webfont; falls back to Georgia offline. */
 @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap');
 @import 'tailwindcss';
-@import 'dockview-core/dist/styles/dockview.css';
 
 /* Warm, restoration-focused desktop palette, exposed as Tailwind v4 tokens.
    Original token NAMES are preserved so existing utilities keep working —

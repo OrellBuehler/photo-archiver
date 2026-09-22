@@ -8,25 +8,26 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "check": "svelte-check --tsgo --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
     "tauri": "tauri"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^7.1.2",
-    "@tailwindcss/vite": "^4.3.1",
-    "@tauri-apps/cli": "^2.11.2",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.11.5",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^26.0.0",
-    "esbuild": "^0.28.1",
-    "svelte": "^5.55.5",
-    "svelte-check": "^4.4.8",
-    "tailwindcss": "^4.3.1",
-    "typescript": "~6.0.2",
-    "vite": "^8.0.12"
+    "@types/node": "^26.6.2",
+    "@typescript/native": "npm:typescript@~7",
+    "esbuild": "^0.28.2",
+    "svelte": "^5.57.1",
+    "svelte-check": "^4.7.6",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6",
+    "vite": "^8.3.0"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
-    "dockview-core": "^7.0.2"
+    "@tauri-apps/plugin-dialog": "^2.7.3",
+    "dockview-core": "^8.3.1"
   }
 }
