@@ -145,81 +145,112 @@ body {
   }
 }
 
-/* Warm up the dockview panel chrome to match the palette. */
-.dockview-theme-vs {
-  --dv-background-color: var(--color-base);
-  --dv-group-view-background-color: var(--color-base);
-  --dv-tabs-and-actions-container-background-color: var(--color-bar);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-bar);
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-bar);
-  --dv-activegroup-visiblepanel-tab-color: var(--color-ink);
-  --dv-activegroup-hiddenpanel-tab-color: var(--color-ink-dim);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--color-ink-dim);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-ink-faint);
-  --dv-tab-divider-color: var(--color-line);
-  --dv-separator-border: var(--color-line);
-  --dv-paneview-header-border-color: var(--color-line);
-  --dv-icon-hover-background-color: var(--color-surface-2);
-  --dv-active-sash-color: var(--color-brand);
-  --dv-sash-color: transparent;
-  --dv-tabs-container-scrollbar-color: var(--border-strong);
+@keyframes pa-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pa-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
 }
 
 @layer components {
   /* Primary action — amber with dark ink + soft amber glow. One per view. */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-[5px] bg-brand px-3 py-1.5 font-medium text-on-brand transition-colors hover:bg-brand-hover active:bg-brand-press disabled:opacity-40 disabled:shadow-none;
+    @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-[5px] bg-brand px-3 text-[13px] font-medium whitespace-nowrap text-on-brand transition-colors hover:bg-brand-hover active:bg-brand-press disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none;
     box-shadow: var(--shadow-accent);
   }
   .btn:active:not(:disabled) {
     transform: scale(0.985);
   }
 
-  /* Secondary / ghost — subtle bordered surface control. */
+  /* Secondary — subtle bordered surface control. */
   .btn-sm {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-[5px] border border-line bg-surface px-2 py-1 text-ink-dim transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40;
+    @apply inline-flex h-7 items-center justify-center gap-1.5 rounded-[5px] border border-line bg-surface px-2.5 text-xs whitespace-nowrap text-ink-dim transition-colors hover:bg-surface-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40;
   }
   .btn-sm-active {
     @apply border-brand/45 bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand;
   }
 
-  /* Destructive. */
-  .btn-danger {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-[5px] border border-danger/40 bg-transparent px-2 py-1 text-danger transition-colors hover:bg-danger-soft disabled:opacity-40;
+  /* Borderless square icon button (toolbars). */
+  .icon-btn {
+    @apply inline-grid h-7 w-7 shrink-0 place-items-center rounded-[5px] text-ink-dim transition-colors hover:bg-surface-2 hover:text-ink disabled:pointer-events-none disabled:opacity-35;
+  }
+  .icon-btn-active {
+    @apply bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand;
   }
 
-  /* Counted filter chip. */
-  .pill {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-ink-dim transition-colors hover:bg-surface-2 hover:text-ink;
+  /* Destructive. */
+  .btn-danger {
+    @apply inline-flex h-7 items-center justify-center gap-1.5 rounded-[5px] border border-danger/40 bg-transparent px-2.5 text-xs whitespace-nowrap text-danger transition-colors hover:bg-danger-soft disabled:opacity-40;
   }
-  .pill-active {
-    @apply border-brand/45 bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand;
+  .btn-danger-solid {
+    @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-[5px] bg-danger px-3 text-[13px] font-medium text-white transition-colors hover:brightness-110;
+  }
+
+  /* Segmented control. */
+  .seg {
+    @apply inline-flex rounded-[6px] border border-line bg-base p-0.5;
+  }
+  .seg > button {
+    @apply inline-flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-xs text-ink-dim transition-colors hover:text-ink;
+  }
+  .seg > button[aria-pressed='true'] {
+    @apply bg-surface-2 text-ink;
+    box-shadow: var(--shadow-xs);
+  }
+
+  /* Removable filter chip. */
+  .chip {
+    @apply inline-flex h-6 items-center gap-1 rounded-full border border-brand/40 bg-brand-soft pr-1 pl-2.5 text-xs text-brand;
   }
 
   /* Form field. */
   .input {
-    @apply w-full rounded-[3px] border border-line bg-surface px-2 py-1 text-ink transition-colors;
+    @apply h-7 w-full rounded-[5px] border border-line bg-base px-2 text-[13px] text-ink transition-colors hover:border-[var(--border-strong)];
+  }
+  select.input {
+    @apply pr-1;
   }
   .input::placeholder {
     color: var(--color-ink-faint);
   }
+
   .btn:focus-visible,
   .btn-sm:focus-visible,
+  .icon-btn:focus-visible,
   .btn-danger:focus-visible,
-  .pill:focus-visible,
+  .seg > button:focus-visible,
   .input:focus-visible {
     outline: 2px solid var(--color-focus);
     outline-offset: 1px;
   }
-  .input:focus-visible {
-    border-color: transparent;
+  .input:focus {
+    border-color: var(--color-focus);
+    outline: none;
+  }
+
+  /* Keyboard hint. */
+  .kbd {
+    @apply inline-grid h-[18px] min-w-[18px] place-items-center rounded-[3px] border border-line bg-surface-2 px-1 font-mono text-[10px] text-ink-dim;
+    box-shadow: inset 0 -1px 0 var(--border-strong);
   }
 
   /* Eyebrow / section label. */
   .eyebrow {
-    @apply text-[11px] font-semibold uppercase text-ink-dim;
-    letter-spacing: 0.04em;
+    @apply text-[11px] font-semibold text-ink-faint uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .scrim {
+    background: var(--bg-overlay);
+    animation: pa-fade-in var(--dur-base) var(--ease-out);
+  }
+  .pop {
+    animation: pa-rise var(--dur-base) var(--ease-out);
   }
 }
