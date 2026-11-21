@@ -16,7 +16,7 @@ pub(crate) fn open_rgb(path: &Path) -> Result<RgbImage> {
         .to_rgb8())
 }
 
-pub(crate) fn save_rgb(img: &RgbImage, path: &Path) -> Result<()> {
+pub(crate) fn encode_jpeg(img: &RgbImage) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY).write_image(
         img.as_raw(),
@@ -24,7 +24,11 @@ pub(crate) fn save_rgb(img: &RgbImage, path: &Path) -> Result<()> {
         img.height(),
         ExtendedColorType::Rgb8,
     )?;
-    std::fs::write(path, buf)?;
+    Ok(buf)
+}
+
+pub(crate) fn save_rgb(img: &RgbImage, path: &Path) -> Result<()> {
+    std::fs::write(path, encode_jpeg(img)?)?;
     Ok(())
 }
 

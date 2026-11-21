@@ -20,6 +20,7 @@ pub struct ImageRecord {
     pub phash: Option<String>,
     pub folder: Option<String>,
     pub history_pos: i64,
+    pub error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -60,11 +61,19 @@ pub struct FilterCounts {
     pub total: i64,
 }
 
-/// Undo/redo availability for a single image's snapshot stack.
+/// One entry of an image's undo stack (`seq` 1.. — the base copy is implicit).
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct TimelineStep {
+    pub seq: i64,
+    pub label: String,
+    pub created_at: String,
+}
+
+/// The undo stack plus the active position: steps with `seq > pos` are undone.
 #[derive(Debug, Clone, Serialize)]
-pub struct SnapshotState {
+pub struct ImageTimeline {
     pub pos: i64,
-    pub max: i64,
+    pub steps: Vec<TimelineStep>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,16 +131,9 @@ impl From<TaskRecord> for TaskOut {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DuplicateGroup {
-    pub image_ids: Vec<i64>,
+    /// Best quality first.
+    pub images: Vec<ImageRecord>,
     pub distance: i64,
-}
-
-#[derive(Debug, Clone, Serialize, FromRow)]
-pub struct HistoryRecord {
-    pub id: i64,
-    pub image_id: i64,
-    pub step: String,
-    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

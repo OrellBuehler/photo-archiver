@@ -5,7 +5,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use crate::models::{
-    FilterCountItem, FilterCounts, HistoryRecord, ImageFilters, ImageRecord, TaskRecord,
+    FilterCountItem, FilterCounts, ImageFilters, ImageRecord, TaskRecord, TimelineStep,
 };
 
 const SCHEMA: &str = r#"
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS images (
   year INTEGER,
   month INTEGER,
   title TEXT,
-  status TEXT NOT NULL DEFAULT 'source',
+  status TEXT NOT NULL DEFAULT 'new',
   organized_path TEXT,
   enhanced_path TEXT,
   thumbnail_path TEXT,
@@ -76,11 +76,19 @@ CREATE TABLE IF NOT EXISTS image_snapshots (
 CREATE INDEX IF NOT EXISTS idx_snapshots_image ON image_snapshots(image_id, seq);
 "#;
 
-/// Idempotent column additions for databases created before these columns
-/// existed. SQLite errors on a duplicate column, which we deliberately ignore.
+/// Idempotent upgrades for databases created by older versions. SQLite errors
+/// on a duplicate column, which we deliberately ignore.
 const MIGRATIONS: &[&str] = &[
     "ALTER TABLE images ADD COLUMN folder TEXT",
     "ALTER TABLE images ADD COLUMN history_pos INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE images ADD COLUMN error TEXT",
+    // Statuses are now new → organized (filed) → restored, plus failed.
+    "UPDATE images SET status = 'new' WHERE status = 'source'",
+    "UPDATE images SET status = 'restored' WHERE status = 'enhanced'",
+    "UPDATE images SET status = 'restored' WHERE status = 'organized' AND EXISTS (
+       SELECT 1 FROM image_snapshots s WHERE s.image_id = images.id AND s.seq > 0
+         AND s.seq <= images.history_pos
+         AND s.label NOT IN ('base', 'rotate_left', 'rotate_right', 'orient', 'auto_orient'))",
 ];
 
 pub async fn init_pool(data_dir: &Path) -> Result<SqlitePool> {
@@ -169,6 +177,14 @@ pub async fn list_images(
     Ok((images, total))
 }
 
+/// Every id matching the filters, in listing order.
+pub async fn list_image_ids(pool: &SqlitePool, f: &ImageFilters) -> Result<Vec<i64>> {
+    let mut qb = QueryBuilder::new("SELECT id FROM images");
+    apply_filters(&mut qb, f);
+    qb.push(" ORDER BY year IS NULL, year DESC, month IS NULL, month DESC, filename ASC");
+    Ok(qb.build_query_scalar().fetch_all(pool).await?)
+}
+
 pub async fn get_image(pool: &SqlitePool, id: i64) -> Result<Option<ImageRecord>> {
     let rec = sqlx::query_as::<_, ImageRecord>("SELECT * FROM images WHERE id = ?")
         .bind(id)
@@ -255,12 +271,16 @@ pub async fn create_task(pool: &SqlitePool, steps_json: &str, total: i64) -> Res
     Ok(id)
 }
 
-pub async fn add_task_item(pool: &SqlitePool, task_id: i64, image_id: i64) -> Result<()> {
-    sqlx::query("INSERT INTO task_items (task_id, image_id) VALUES (?, ?)")
-        .bind(task_id)
-        .bind(image_id)
-        .execute(pool)
-        .await?;
+pub async fn add_task_items(pool: &SqlitePool, task_id: i64, image_ids: &[i64]) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    for id in image_ids {
+        sqlx::query("INSERT INTO task_items (task_id, image_id) VALUES (?, ?)")
+            .bind(task_id)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -361,21 +381,64 @@ pub async fn add_history(pool: &SqlitePool, image_id: i64, step: &str) -> Result
     Ok(())
 }
 
-pub async fn list_history(pool: &SqlitePool, image_id: i64) -> Result<Vec<HistoryRecord>> {
-    Ok(sqlx::query_as::<_, HistoryRecord>(
-        "SELECT * FROM image_history WHERE image_id = ? ORDER BY created_at, id",
+/// Derive the status from what exists on disk and in the undo stack, and
+/// clear any earlier failure: new → organized (filed) → restored.
+pub async fn refresh_status(pool: &SqlitePool, id: i64) -> Result<()> {
+    // Rotation-only snapshot labels don't count as restoration.
+    sqlx::query(
+        "UPDATE images SET error = NULL, updated_at = datetime('now'), status = CASE
+           WHEN organized_path IS NULL THEN 'new'
+           WHEN enhanced_path IS NOT NULL OR EXISTS (
+             SELECT 1 FROM image_snapshots s WHERE s.image_id = images.id AND s.seq > 0
+               AND s.seq <= images.history_pos
+               AND s.label NOT IN ('base', 'rotate_left', 'rotate_right', 'orient', 'auto_orient'))
+             THEN 'restored'
+           ELSE 'organized' END
+         WHERE id = ?",
     )
-    .bind(image_id)
-    .fetch_all(pool)
-    .await?)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
-pub async fn set_image_status(pool: &SqlitePool, id: i64, status: &str) -> Result<()> {
-    sqlx::query("UPDATE images SET status = ?, updated_at = datetime('now') WHERE id = ?")
-        .bind(status)
-        .bind(id)
-        .execute(pool)
-        .await?;
+pub async fn set_image_failed(pool: &SqlitePool, id: i64, error: &str) -> Result<()> {
+    sqlx::query(
+        "UPDATE images SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ?",
+    )
+    .bind(error)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Forget an image's output files: back to an untouched scan.
+pub async fn clear_image_files(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query(
+        "UPDATE images SET organized_path = NULL, enhanced_path = NULL, history_pos = 0,
+           status = 'new', error = NULL, updated_at = datetime('now') WHERE id = ?",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn set_image_paths(
+    pool: &SqlitePool,
+    id: i64,
+    organized: &str,
+    enhanced: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE images SET organized_path = ?, enhanced_path = ?, updated_at = datetime('now') WHERE id = ?",
+    )
+    .bind(organized)
+    .bind(enhanced)
+    .bind(id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -503,12 +566,6 @@ pub async fn delete_images(pool: &SqlitePool, ids: &[i64]) -> Result<u64> {
     Ok(res.rows_affected())
 }
 
-pub async fn all_image_ids(pool: &SqlitePool) -> Result<Vec<i64>> {
-    Ok(sqlx::query_scalar("SELECT id FROM images ORDER BY id")
-        .fetch_all(pool)
-        .await?)
-}
-
 pub async fn images_without_phash(pool: &SqlitePool) -> Result<Vec<(i64, String)>> {
     Ok(
         sqlx::query_as::<_, (i64, String)>(
@@ -528,9 +585,11 @@ pub async fn set_phash(pool: &SqlitePool, id: i64, phash: &str) -> Result<()> {
     Ok(())
 }
 
+/// Hashed images, best quality (largest) first.
 pub async fn images_with_phash(pool: &SqlitePool) -> Result<Vec<(i64, String)>> {
     Ok(sqlx::query_as::<_, (i64, String)>(
-        "SELECT id, phash FROM images WHERE phash IS NOT NULL ORDER BY id",
+        "SELECT id, phash FROM images WHERE phash IS NOT NULL
+         ORDER BY COALESCE(width * height, 0) DESC, COALESCE(file_size, 0) DESC, id",
     )
     .fetch_all(pool)
     .await?)
@@ -587,6 +646,27 @@ pub async fn add_snapshot(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// The undo stack above the base copy, oldest first.
+pub async fn list_snapshots(pool: &SqlitePool, image_id: i64) -> Result<Vec<TimelineStep>> {
+    Ok(sqlx::query_as::<_, TimelineStep>(
+        "SELECT seq, label, created_at FROM image_snapshots WHERE image_id = ? AND seq > 0 ORDER BY seq",
+    )
+    .bind(image_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Steps currently baked into the organized copy (undone ones excluded).
+pub async fn applied_steps(pool: &SqlitePool, image_id: i64) -> Result<Vec<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT s.label FROM image_snapshots s JOIN images i ON i.id = s.image_id
+         WHERE s.image_id = ? AND s.seq > 0 AND s.seq <= i.history_pos ORDER BY s.seq",
+    )
+    .bind(image_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn snapshot_path_at(
@@ -647,4 +727,52 @@ pub async fn take_all_snapshots(pool: &SqlitePool, image_id: i64) -> Result<Vec<
         .execute(pool)
         .await?;
     Ok(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_follows_files_and_undo_stack() {
+        let dir = std::env::temp_dir().join(format!("pa_db_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        tauri::async_runtime::block_on(async {
+            let pool = init_pool(&dir).await.unwrap();
+            sqlx::query("INSERT INTO images (source_path, filename) VALUES ('a.jpg', 'a.jpg')")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let status = || async { get_image(&pool, 1).await.unwrap().unwrap().status };
+            assert_eq!(status().await, "new");
+
+            set_image_organized(&pool, 1, "organized/unsorted/a_1.jpg").await.unwrap();
+            add_snapshot(&pool, 1, 0, "base", ".snapshots/1/0.jpg").await.unwrap();
+            add_snapshot(&pool, 1, 1, "rotate_left", ".snapshots/1/1.jpg").await.unwrap();
+            set_history_pos(&pool, 1, 1).await.unwrap();
+            refresh_status(&pool, 1).await.unwrap();
+            assert_eq!(status().await, "organized");
+
+            add_snapshot(&pool, 1, 2, "crop", ".snapshots/1/2.jpg").await.unwrap();
+            set_history_pos(&pool, 1, 2).await.unwrap();
+            refresh_status(&pool, 1).await.unwrap();
+            assert_eq!(status().await, "restored");
+            assert_eq!(applied_steps(&pool, 1).await.unwrap(), ["rotate_left", "crop"]);
+
+            // Undoing the crop leaves it on the stack but no longer applied.
+            set_history_pos(&pool, 1, 1).await.unwrap();
+            set_image_failed(&pool, 1, "boom").await.unwrap();
+            assert_eq!(status().await, "failed");
+            refresh_status(&pool, 1).await.unwrap();
+            assert_eq!(status().await, "organized");
+            assert_eq!(applied_steps(&pool, 1).await.unwrap(), ["rotate_left"]);
+            assert_eq!(list_snapshots(&pool, 1).await.unwrap().len(), 2);
+
+            clear_image_files(&pool, 1).await.unwrap();
+            assert_eq!(status().await, "new");
+            pool.close().await;
+        });
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

@@ -6,11 +6,11 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::models::{
-    AppSettings, DuplicateGroup, FilterCounts, HistoryRecord, ImageFilters, ImageListResponse,
-    ImageRecord, ModelEvent, ModelStatus, ProgressEvent, SnapshotState, TaskOut,
+    AppSettings, DuplicateGroup, FilterCounts, ImageFilters, ImageListResponse, ImageRecord,
+    ImageTimeline, ModelEvent, ModelStatus, ProgressEvent, TaskOut,
 };
 use crate::state::AppState;
-use crate::{db, hash, imaging, ml, organize, pipeline, scan, snapshots, thumbnails};
+use crate::{db, hash, imaging, ml, pipeline, scan, snapshots, thumbnails};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -101,8 +101,11 @@ pub async fn image_stats(
 }
 
 #[tauri::command]
-pub async fn get_image(state: State<'_, AppState>, id: i64) -> CmdResult<Option<ImageRecord>> {
-    db::get_image(&state.db, id).await.map_err(err)
+pub async fn list_image_ids(
+    state: State<'_, AppState>,
+    filters: ImageFilters,
+) -> CmdResult<Vec<i64>> {
+    db::list_image_ids(&state.db, &filters).await.map_err(err)
 }
 
 #[tauri::command]
@@ -140,29 +143,26 @@ pub async fn get_thumbnail(state: State<'_, AppState>, id: i64) -> CmdResult<Res
 pub async fn start_batch(
     state: State<'_, AppState>,
     image_ids: Vec<i64>,
-    all: bool,
     steps: Vec<String>,
+    force: bool,
     on_event: Channel<ProgressEvent>,
 ) -> CmdResult<TaskOut> {
-    let ids = if all {
-        db::all_image_ids(&state.db).await.map_err(err)?
-    } else {
-        image_ids
-    };
+    let ids = image_ids;
     if ids.is_empty() {
-        return Err("No images selected".into());
+        return Err("No photos selected".into());
     }
     if steps.is_empty() {
         return Err("No steps selected".into());
+    }
+    if state.running.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("A restore is already running".into());
     }
 
     let steps_json = serde_json::to_string(&steps).map_err(err)?;
     let task_id = db::create_task(&state.db, &steps_json, ids.len() as i64)
         .await
         .map_err(err)?;
-    for &id in &ids {
-        db::add_task_item(&state.db, task_id, id).await.map_err(err)?;
-    }
+    db::add_task_items(&state.db, task_id, &ids).await.map_err(err)?;
 
     if !state.try_start(task_id) {
         db::set_task_status(
@@ -173,11 +173,16 @@ pub async fn start_batch(
         )
         .await
         .ok();
-        return Err("A task is already running".into());
+        return Err("A restore is already running".into());
     }
 
-    let result = pipeline::run(state.inner(), task_id, ids, steps, &on_event).await;
+    let result = pipeline::run(state.inner(), task_id, ids, steps, force, &on_event).await;
     state.finish();
+    if let Err(e) = &result {
+        db::set_task_status(&state.db, task_id, "failed", Some(&e.to_string()))
+            .await
+            .ok();
+    }
     result.map_err(err)?;
 
     let task = db::get_task(&state.db, task_id)
@@ -198,35 +203,46 @@ pub async fn list_tasks(state: State<'_, AppState>) -> CmdResult<Vec<TaskOut>> {
     Ok(tasks.into_iter().map(Into::into).collect())
 }
 
+/// The undo stack of one photo: which steps are baked in, which are undone.
 #[tauri::command]
-pub async fn get_task(state: State<'_, AppState>, id: i64) -> CmdResult<Option<TaskOut>> {
-    Ok(db::get_task(&state.db, id).await.map_err(err)?.map(Into::into))
-}
-
-#[tauri::command]
-pub async fn image_history(
-    state: State<'_, AppState>,
-    id: i64,
-) -> CmdResult<Vec<HistoryRecord>> {
-    db::list_history(&state.db, id).await.map_err(err)
+pub async fn image_timeline(state: State<'_, AppState>, id: i64) -> CmdResult<ImageTimeline> {
+    let pos = db::get_history_pos(&state.db, id).await.map_err(err)?;
+    let steps = db::list_snapshots(&state.db, id).await.map_err(err)?;
+    Ok(ImageTimeline { pos, steps })
 }
 
 // ─── Image mutations ──────────────────────────────────────────────────────────
 
-/// The organized copy was just rewritten, so any enhanced (4× upscale) copy is
-/// stale — drop it (file + DB) and fall the status back to "organized" so the
-/// viewer and thumbnail show the change rather than the old enhanced image.
-async fn drop_stale_enhanced(state: &AppState, img: &ImageRecord) -> CmdResult<()> {
-    if let Some(p) = &img.enhanced_path {
-        let _ = std::fs::remove_file(state.output_dir().join(p));
-        db::clear_image_enhanced(&state.db, img.id).await.map_err(err)?;
-        db::set_image_status(&state.db, img.id, "organized").await.map_err(err)?;
+const BUSY: &str = "This photo is being restored right now";
+
+/// The organized copy was just rewritten by hand: drop the stale upscale,
+/// re-derive the status and let the thumbnail regenerate.
+async fn after_edit(state: &AppState, img: &ImageRecord) -> CmdResult<()> {
+    pipeline::drop_enhanced(state, img).await.map_err(err)?;
+    db::refresh_status(&state.db, img.id).await.map_err(err)?;
+    let _ = std::fs::remove_file(state.thumbnails_dir().join(format!("{}.jpg", img.id)));
+    Ok(())
+}
+
+/// Move the filed copies of these photos to match their current date/folder.
+async fn refile_ids(state: &AppState, ids: &[i64]) -> CmdResult<()> {
+    for img in db::fetch_images(&state.db, ids).await.map_err(err)? {
+        // The running task refiles its own photos when it is done with them.
+        if state.is_busy(img.id) {
+            continue;
+        }
+        if let Err(e) = pipeline::refile(state, &img).await {
+            log::warn!("refile: image {} failed: {e}", img.id);
+        }
     }
     Ok(())
 }
 
 /// Rotate one image's organized copy 90°, snapshotting so it can be undone.
 async fn rotate_one(state: &AppState, id: i64, clockwise: bool) -> CmdResult<()> {
+    if state.is_busy(id) {
+        return Err(BUSY.into());
+    }
     let img = db::get_image(&state.db, id)
         .await
         .map_err(err)?
@@ -237,24 +253,9 @@ async fn rotate_one(state: &AppState, id: i64, clockwise: bool) -> CmdResult<()>
     // Rotation operates on the organized copy; create it if needed.
     let rel = match img.organized_path.clone().filter(|r| output_dir.join(r).exists()) {
         Some(r) => r,
-        None => {
-            let source_abs = source_dir.join(&img.source_path);
-            let source_rel = img.source_path.clone();
-            let od = output_dir.clone();
-            let bn = pipeline::base_name(&img);
-            let album = img.folder.clone();
-            let (year, month) = (img.year, img.month);
-            let r = tauri::async_runtime::spawn_blocking(move || {
-                organize::organize(&source_abs, &source_rel, &od, album.as_deref(), year, month, &bn)
-            })
+        None => pipeline::do_organize(state, &img, &source_dir, &output_dir)
             .await
-            .map_err(err)?
-            .map_err(err)?;
-            db::set_image_organized(&state.db, id, &r).await.map_err(err)?;
-            // A fresh organized copy resets the undo stack to this base.
-            snapshots::reset(state, id, &output_dir.join(&r)).await.map_err(err)?;
-            r
-        }
+            .map_err(err)?,
     };
 
     let abs = output_dir.join(&rel);
@@ -275,22 +276,7 @@ async fn rotate_one(state: &AppState, id: i64, clockwise: bool) -> CmdResult<()>
     }
     snapshots::record(state, id, step, &abs2).await.map_err(err)?;
     db::add_history(&state.db, id, step).await.map_err(err)?;
-    drop_stale_enhanced(state, &img).await?;
-    let _ = std::fs::remove_file(state.thumbnails_dir().join(format!("{id}.jpg")));
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn rotate_image(
-    state: State<'_, AppState>,
-    id: i64,
-    clockwise: bool,
-) -> CmdResult<ImageRecord> {
-    rotate_one(state.inner(), id, clockwise).await?;
-    db::get_image(&state.db, id)
-        .await
-        .map_err(err)?
-        .ok_or_else(|| "Image not found".into())
+    after_edit(state, &img).await
 }
 
 #[tauri::command]
@@ -322,6 +308,7 @@ pub async fn update_image(
     db::update_image_meta(&state.db, id, year, month, title, true, true, true)
         .await
         .map_err(err)?;
+    refile_ids(state.inner(), &[id]).await?;
     db::get_image(&state.db, id)
         .await
         .map_err(err)?
@@ -337,13 +324,18 @@ pub async fn bulk_update(
     title: Option<String>,
 ) -> CmdResult<u64> {
     let (sy, sm, st) = (year.is_some(), month.is_some(), title.is_some());
-    db::bulk_update_meta(&state.db, &ids, year, month, title, sy, sm, st)
+    let n = db::bulk_update_meta(&state.db, &ids, year, month, title, sy, sm, st)
         .await
-        .map_err(err)
+        .map_err(err)?;
+    refile_ids(state.inner(), &ids).await?;
+    Ok(n)
 }
 
 #[tauri::command]
 pub async fn bulk_delete(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<u64> {
+    if ids.iter().any(|&id| state.is_busy(id)) {
+        return Err(BUSY.into());
+    }
     let recs = db::fetch_images(&state.db, &ids).await.map_err(err)?;
     let output_dir = state.output_dir();
     let thumbs = state.thumbnails_dir();
@@ -369,12 +361,31 @@ pub async fn set_folder(
     let f = folder
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    db::set_folder(&state.db, &ids, f.as_deref()).await.map_err(err)
+    let n = db::set_folder(&state.db, &ids, f.as_deref()).await.map_err(err)?;
+    refile_ids(state.inner(), &ids).await?;
+    Ok(n)
+}
+
+/// Discard everything made from these scans so they are untouched again.
+#[tauri::command]
+pub async fn reset_images(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<u64> {
+    if ids.iter().any(|&id| state.is_busy(id)) {
+        return Err(BUSY.into());
+    }
+    let mut n = 0;
+    for img in db::fetch_images(&state.db, &ids).await.map_err(err)? {
+        pipeline::reset_image(state.inner(), &img).await.map_err(err)?;
+        n += 1;
+    }
+    Ok(n)
 }
 
 // ─── Undo / redo (snapshot stack) ──────────────────────────────────────────────
 
 async fn step_snapshot(state: &AppState, id: i64, forward: bool) -> CmdResult<ImageRecord> {
+    if state.is_busy(id) {
+        return Err(BUSY.into());
+    }
     let img = db::get_image(&state.db, id)
         .await
         .map_err(err)?
@@ -401,8 +412,7 @@ async fn step_snapshot(state: &AppState, id: i64, forward: bool) -> CmdResult<Im
         db::add_history(&state.db, id, if forward { "redo" } else { "undo" })
             .await
             .map_err(err)?;
-        drop_stale_enhanced(state, &img).await?;
-        let _ = std::fs::remove_file(state.thumbnails_dir().join(format!("{id}.jpg")));
+        after_edit(state, &img).await?;
     }
 
     db::get_image(&state.db, id)
@@ -419,13 +429,6 @@ pub async fn undo_image(state: State<'_, AppState>, id: i64) -> CmdResult<ImageR
 #[tauri::command]
 pub async fn redo_image(state: State<'_, AppState>, id: i64) -> CmdResult<ImageRecord> {
     step_snapshot(state.inner(), id, true).await
-}
-
-#[tauri::command]
-pub async fn snapshot_state(state: State<'_, AppState>, id: i64) -> CmdResult<SnapshotState> {
-    let pos = db::get_history_pos(&state.db, id).await.map_err(err)?;
-    let max = db::max_snapshot_seq(&state.db, id).await.map_err(err)?;
-    Ok(SnapshotState { pos, max })
 }
 
 #[tauri::command]
@@ -446,10 +449,21 @@ pub async fn get_variant(
     }
     .ok_or("Variant not available")?;
 
-    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(&path))
-        .await
-        .map_err(err)?
-        .map_err(err)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
+        // Webviews can't show TIFF scans, so those are served as JPEG.
+        let tiff = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("tif") || e.eq_ignore_ascii_case("tiff"));
+        if tiff {
+            imaging::encode_jpeg(&imaging::open_rgb(&path)?)
+        } else {
+            Ok(std::fs::read(&path)?)
+        }
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)?;
     Ok(Response::new(bytes))
 }
 
@@ -473,7 +487,8 @@ pub async fn scan_duplicates(state: State<'_, AppState>) -> CmdResult<usize> {
     Ok(done)
 }
 
-fn group_duplicates(rows: Vec<(i64, String)>, threshold: u32) -> Vec<DuplicateGroup> {
+/// Group look-alikes. `rows` come best quality first, and so does each group.
+fn group_duplicates(rows: Vec<(i64, String)>, threshold: u32) -> Vec<(Vec<i64>, i64)> {
     let mut used = vec![false; rows.len()];
     let mut groups = Vec::new();
     for i in 0..rows.len() {
@@ -496,10 +511,7 @@ fn group_duplicates(rows: Vec<(i64, String)>, threshold: u32) -> Vec<DuplicateGr
         }
         if ids.len() > 1 {
             used[i] = true;
-            groups.push(DuplicateGroup {
-                image_ids: ids,
-                distance: max_dist as i64,
-            });
+            groups.push((ids, max_dist as i64));
         }
     }
     groups
@@ -515,7 +527,13 @@ pub async fn find_duplicates(
         tauri::async_runtime::spawn_blocking(move || group_duplicates(rows, threshold.max(0) as u32))
             .await
             .map_err(err)?;
-    Ok(groups)
+    let mut out = Vec::with_capacity(groups.len());
+    for (ids, distance) in groups {
+        let mut images = db::fetch_images(&state.db, &ids).await.map_err(err)?;
+        images.sort_by_key(|i| ids.iter().position(|&id| id == i.id));
+        out.push(DuplicateGroup { images, distance });
+    }
+    Ok(out)
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -584,6 +602,35 @@ pub async fn open_log_dir(app: AppHandle) -> CmdResult<()> {
     app.opener()
         .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
         .map_err(err)
+}
+
+#[tauri::command]
+pub async fn open_output_dir(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    let dir = state.output_dir();
+    let organized = dir.join("organized");
+    let target = if organized.is_dir() { organized } else { dir };
+    let _ = std::fs::create_dir_all(&target);
+    app.opener()
+        .open_path(target.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(err)
+}
+
+/// Show a photo's best existing file in the system file manager.
+#[tauri::command]
+pub async fn reveal_image(app: AppHandle, state: State<'_, AppState>, id: i64) -> CmdResult<()> {
+    let img = db::get_image(&state.db, id)
+        .await
+        .map_err(err)?
+        .ok_or("Image not found")?;
+    let output_dir = state.output_dir();
+    let path = [&img.enhanced_path, &img.organized_path]
+        .into_iter()
+        .flatten()
+        .map(|p| output_dir.join(p))
+        .find(|p| p.exists())
+        .or_else(|| state.source_dir().map(|s| s.join(&img.source_path)))
+        .ok_or("No file to show")?;
+    app.opener().reveal_item_in_dir(path).map_err(err)
 }
 
 #[tauri::command]
