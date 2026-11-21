@@ -1,30 +1,32 @@
 <script lang="ts">
   import { store } from '../store.svelte'
-  import { MONTHS } from '../types'
+  import { MONTHS, dateLabel } from '../types'
   import Icon from '../ui/Icon.svelte'
   import Thumb from '../ui/Thumb.svelte'
 
-  let form = $state({ title: '', year: '', month: '' })
-  let folder = $state('')
+  let form = $state({ title: '', year: '', month: '', folder: '' })
 
   const ids = $derived([...store.selected])
-  const yearValid = $derived(form.year.trim() === '' || /^\d{4}$/.test(form.year.trim()))
-  const canApply = $derived(yearValid && (form.title.trim() !== '' || form.year.trim() !== '' || form.month !== ''))
+  const yearValid = $derived(form.year.trim() === '' || /^(1[89]|20)\d{2}$/.test(form.year.trim()))
+  const hasMeta = $derived(form.title.trim() !== '' || form.year.trim() !== '' || form.month !== '')
+  const canApply = $derived(yearValid && (hasMeta || form.folder.trim() !== ''))
+  const last = $derived(store.lastMeta)
+  const lastLabel = $derived(
+    last ? [last.year != null ? dateLabel(last) : null, last.folder].filter(Boolean).join(' · ') : '',
+  )
 
   async function apply() {
     if (!canApply) return
-    await store.editTargets(
-      form.year.trim() ? Number(form.year) : null,
-      form.month ? Number(form.month) : null,
-      form.title.trim() || null,
-    )
-    form = { title: '', year: '', month: '' }
-  }
-
-  async function move(clear = false) {
-    if (!clear && !folder.trim()) return
-    await store.setFolderTargets(clear ? null : folder.trim())
-    folder = ''
+    const folder = form.folder.trim()
+    if (hasMeta) {
+      await store.editTargets(
+        form.year.trim() ? Number(form.year) : null,
+        form.month ? Number(form.month) : null,
+        form.title.trim() || null,
+      )
+    }
+    if (folder) await store.setFolderTargets(folder)
+    form = { title: '', year: '', month: '', folder: '' }
   }
 </script>
 
@@ -49,15 +51,15 @@
   <div class="flex gap-1 border-b border-line px-3 pb-3">
     <button class="btn-sm flex-1" onclick={() => store.rotateTargets(false)}><Icon name="rotateCcw" size={13} />Left</button>
     <button class="btn-sm flex-1" onclick={() => store.rotateTargets(true)}><Icon name="rotateCw" size={13} />Right</button>
-    <button class="btn-danger flex-1" onclick={() => store.deleteTargets()}><Icon name="trash" size={13} />Delete</button>
+    <button class="btn-sm flex-1" onclick={() => store.openInspector('restore')}><Icon name="wand" size={13} />Restore</button>
   </div>
 
   <section class="flex flex-col gap-2.5 border-b border-line px-3 py-4">
     <div>
-      <h3 class="eyebrow">Set date & title</h3>
-      <p class="mt-0.5 text-[11px] text-ink-faint">Only fields you fill in are changed.</p>
+      <h3 class="eyebrow">Date, title and folder</h3>
+      <p class="mt-0.5 text-[11px] text-ink-faint">Only what you fill in changes. Filed copies move along.</p>
     </div>
-    <div class="grid grid-cols-[88px_1fr] gap-2">
+    <div class="grid grid-cols-[84px_1fr] gap-2">
       <input
         class="input tabular-nums"
         class:!border-danger={!yearValid}
@@ -75,31 +77,37 @@
       </select>
     </div>
     <input class="input" bind:value={form.title} placeholder="Title" onkeydown={(e) => e.key === 'Enter' && apply()} />
-    <button class="btn" disabled={!canApply} onclick={apply}>
-      <Icon name="check" size={14} />Apply to {ids.length}
-    </button>
-  </section>
-
-  <section class="flex flex-col gap-2.5 px-3 py-4">
-    <div>
-      <h3 class="eyebrow">Group into folder</h3>
-      <p class="mt-0.5 text-[11px] text-ink-faint">Keeps an event together, e.g. “Wedding 1978”. Applied when next organized.</p>
-    </div>
     <input
       class="input"
-      bind:value={folder}
-      placeholder="Folder name"
+      bind:value={form.folder}
+      placeholder="Folder — e.g. Hochzeit 1978"
       list="batch-folder-suggestions"
-      onkeydown={(e) => e.key === 'Enter' && move()}
+      onkeydown={(e) => e.key === 'Enter' && apply()}
     />
     <datalist id="batch-folder-suggestions">
       {#each store.counts.folders as fl (fl.value)}<option value={fl.value}></option>{/each}
     </datalist>
-    <div class="flex gap-2">
-      <button class="btn-sm h-8 flex-1" disabled={!folder.trim()} onclick={() => move()}>
-        <Icon name="folder" size={13} />Move {ids.length}
+    <button class="btn" disabled={!canApply} onclick={apply}>
+      <Icon name="check" size={14} />Apply to {ids.length}
+    </button>
+    {#if lastLabel}
+      <button class="btn-sm justify-start" onclick={() => store.applyLast()}>
+        <Icon name="repeat" size={13} />
+        <span class="truncate">Same as last: {lastLabel}</span>
+        <span class="kbd ml-auto">.</span>
       </button>
-      <button class="btn-sm h-8" onclick={() => move(true)}>Remove from folder</button>
-    </div>
+    {/if}
+  </section>
+
+  <section class="flex flex-col gap-1.5 px-3 py-4">
+    <button class="btn-sm justify-start" onclick={() => store.setFolderTargets(null)}>
+      <Icon name="folder" size={13} />Take out of their folder
+    </button>
+    <button class="btn-sm justify-start" onclick={() => store.resetTargets()}>
+      <Icon name="history" size={13} />Start over from the scans
+    </button>
+    <button class="btn-danger justify-start" onclick={() => store.deleteTargets()}>
+      <Icon name="trash" size={13} />Remove from library
+    </button>
   </section>
 </div>

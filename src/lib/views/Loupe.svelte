@@ -1,14 +1,12 @@
 <script lang="ts">
   import { store } from '../store.svelte'
-  import { getVariant, redoImage, snapshotState, undoImage } from '../api'
-  import type { SnapshotState } from '../types'
-  import { invalidateThumb } from '../thumbs'
+  import { getVariant, imageTimeline } from '../api'
+  import { dateLabel } from '../types'
   import Icon from '../ui/Icon.svelte'
   import Thumb from '../ui/Thumb.svelte'
   import Spinner from '../ui/Spinner.svelte'
 
   type Variant = 'source' | 'organized' | 'enhanced'
-  const VARIANT_LABEL: Record<Variant, string> = { source: 'Original', organized: 'Organized', enhanced: 'Restored' }
 
   const image = $derived(store.focused)
   let variant = $state<Variant>('source')
@@ -17,7 +15,9 @@
   let loadingImg = $state(false)
   let comparing = $state(false)
   let split = $state(50)
-  let snap = $state<SnapshotState>({ pos: 0, max: 0 })
+  let snap = $state({ pos: 0, max: 0 })
+  // Holding O shows the untouched scan for as long as the key is down.
+  let peeking = $state(false)
 
   let scale = $state(1)
   let tx = $state(0)
@@ -51,8 +51,11 @@
     if (!sameImage) {
       variant = img.enhanced_path ? 'enhanced' : img.organized_path ? 'organized' : 'source'
       comparing = false
+      peeking = false
       split = 50
       resetZoom()
+      if (beforeUrl) URL.revokeObjectURL(beforeUrl)
+      beforeUrl = null
     } else if (!variants.includes(variant)) {
       variant = 'source'
     }
@@ -62,11 +65,11 @@
   async function load(id: number) {
     loadingImg = true
     try {
-      const [next, s] = await Promise.all([getVariant(id, variant), snapshotState(id)])
+      const [next, t] = await Promise.all([getVariant(id, variant), imageTimeline(id)])
       if (store.focusedId !== id) return URL.revokeObjectURL(next)
       if (url) URL.revokeObjectURL(url)
       url = next
-      snap = s
+      snap = { pos: t.pos, max: t.steps.length }
       if (comparing) await loadBefore(id)
     } catch (e) {
       store.fail(e)
@@ -77,8 +80,15 @@
 
   async function loadBefore(id: number) {
     const next = await getVariant(id, 'source')
+    if (store.focusedId !== id) return URL.revokeObjectURL(next)
     if (beforeUrl) URL.revokeObjectURL(beforeUrl)
     beforeUrl = next
+  }
+
+  function peek(on: boolean) {
+    if (!image || variant === 'source' || comparing) return (peeking = false)
+    peeking = on
+    if (on && !beforeUrl) loadBefore(image.id).catch((e) => store.fail(e))
   }
 
   async function pick(v: Variant) {
@@ -148,17 +158,8 @@
     }
   })
 
-  async function history(redo: boolean) {
-    if (!image) return
-    const id = image.id
-    try {
-      await (redo ? redoImage(id) : undoImage(id))
-      invalidateThumb(id)
-      store.thumbVersion++
-      await store.refresh()
-    } catch (e) {
-      store.fail(e)
-    }
+  function history(redo: boolean) {
+    if (image) store.undoRedo(image.id, redo)
   }
 
   $effect(() => {
@@ -166,7 +167,7 @@
       if (store.view !== 'loupe' || e.defaultPrevented) return
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
-      if (store.settingsOpen || store.shortcutsOpen || store.confirmRequest) return
+      if (store.settingsOpen || store.shortcutsOpen || store.confirmRequest || store.menu) return
       const mod = e.ctrlKey || e.metaKey
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         e.preventDefault()
@@ -178,6 +179,7 @@
         e.preventDefault()
         store.view = 'grid'
       } else if (e.key === 'c') toggleCompare()
+      else if (e.key === 'o' && !mod) peek(true)
       else if (e.key === '+' || e.key === '=') zoomBy(1.3)
       else if (e.key === '-') zoomBy(1 / 1.3)
       else if (e.key === '0') resetZoom()
@@ -189,8 +191,15 @@
         history(true)
       }
     }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'o') peeking = false
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+    }
   })
 
   $effect(() => {
@@ -199,49 +208,61 @@
   })
 </script>
 
-<div class="flex h-full min-w-0 flex-col">
+<div class="@container flex h-full min-w-0 flex-col">
   <div class="flex h-11 shrink-0 items-center gap-2 border-b border-line px-2">
     <button class="btn-sm" onclick={() => (store.view = 'grid')} title="Back to grid (Esc)">
       <Icon name="arrowLeft" size={13} />Grid
     </button>
     {#if image}
       <span class="min-w-0 truncate px-1 text-[13px] font-medium text-ink" title={image.source_path}>
-        {image.title ?? image.filename}
+        {image.title ?? image.scan_id ?? image.filename}
       </span>
-      <span class="shrink-0 text-xs text-ink-faint tabular-nums">{idx + 1} / {store.total}</span>
+      <span class="shrink-0 text-xs tabular-nums @max-xl:hidden {image.year == null ? 'text-warning' : 'text-ink-dim'}">{dateLabel(image) ?? 'no date'}</span>
+      <span class="shrink-0 text-xs text-ink-faint tabular-nums @max-xl:hidden">{idx + 1} / {store.total}</span>
 
-      <div class="ml-auto flex items-center gap-1">
-        {#if variants.length > 1}
+      <div class="ml-auto flex shrink-0 items-center gap-1">
+        {#if variants.length > 2}
           <div class="seg mr-1">
-            {#each variants as v (v)}
-              <button aria-pressed={variant === v} onclick={() => pick(v)}>{VARIANT_LABEL[v]}</button>
-            {/each}
+            <button aria-pressed={variant === 'organized'} onclick={() => pick('organized')} title="The restored copy at its scanned size">1×</button>
+            <button aria-pressed={variant === 'enhanced'} onclick={() => pick('enhanced')} title="The 4× upscaled copy">4×</button>
           </div>
-          <button class="btn-sm" class:btn-sm-active={comparing} disabled={!canCompare} onclick={toggleCompare} title="Compare with original (C)">
+        {/if}
+        {#if variants.length > 1}
+          <button
+            class="btn-sm"
+            class:btn-sm-active={peeking}
+            disabled={!canCompare || comparing}
+            title="Hold to see the untouched scan (hold O)"
+            onmousedown={() => peek(true)}
+            onmouseup={() => peek(false)}
+            onmouseleave={() => peek(false)}
+          >
+            <Icon name="eye" size={13} />Scan
+          </button>
+          <button class="btn-sm" class:btn-sm-active={comparing} disabled={!canCompare} onclick={toggleCompare} title="Slide between scan and result (C)">
             <Icon name="columns" size={13} />Compare
           </button>
-          <div class="mx-1 h-4 w-px bg-line"></div>
+          <div class="mx-1 h-4 w-px bg-line @max-xl:hidden"></div>
         {/if}
-        <button class="icon-btn" title="Zoom out (−)" aria-label="Zoom out" disabled={comparing || scale <= 1} onclick={() => zoomBy(1 / 1.3)}>
-          <Icon name="zoomOut" size={15} />
-        </button>
-        <button class="btn-sm w-14 tabular-nums" title="Fit (0)" disabled={comparing || scale === 1} onclick={resetZoom}>
+        <button
+          class="btn-sm w-14 tabular-nums @max-xl:hidden"
+          title="Zoom: scroll or double-click · fit with 0"
+          disabled={comparing}
+          onclick={() => (scale === 1 ? (scale = 2) : resetZoom())}
+        >
           {scale === 1 ? 'Fit' : `${Math.round(scale * 100)}%`}
         </button>
-        <button class="icon-btn" title="Zoom in (+)" aria-label="Zoom in" disabled={comparing || scale >= 8} onclick={() => zoomBy(1.3)}>
-          <Icon name="zoomIn" size={15} />
-        </button>
-        <div class="mx-1 h-4 w-px bg-line"></div>
-        <button class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={snap.pos <= 0} onclick={() => history(false)}>
+        <div class="mx-1 h-4 w-px bg-line @max-xl:hidden"></div>
+        <button class="icon-btn @max-xl:hidden" title="Undo last step (Ctrl+Z)" aria-label="Undo" disabled={snap.pos <= 0} onclick={() => history(false)}>
           <Icon name="undo" size={15} />
         </button>
-        <button class="icon-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={snap.pos >= snap.max} onclick={() => history(true)}>
+        <button class="icon-btn @max-xl:hidden" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={snap.pos >= snap.max} onclick={() => history(true)}>
           <Icon name="redo" size={15} />
         </button>
-        <button class="icon-btn" title="Rotate left ([)" aria-label="Rotate left" onclick={() => store.rotateTargets(false)}>
+        <button class="icon-btn @max-xl:hidden" title="Rotate left ([)" aria-label="Rotate left" onclick={() => store.rotateTargets(false)}>
           <Icon name="rotateCcw" size={15} />
         </button>
-        <button class="icon-btn" title="Rotate right (])" aria-label="Rotate right" onclick={() => store.rotateTargets(true)}>
+        <button class="icon-btn @max-xl:hidden" title="Rotate right (])" aria-label="Rotate right" onclick={() => store.rotateTargets(true)}>
           <Icon name="rotateCw" size={15} />
         </button>
       </div>
@@ -279,8 +300,8 @@
       <div class="absolute inset-0" style="clip-path: inset(0 {100 - split}% 0 0)">
         <img src={beforeUrl} alt="" draggable="false" class="absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] object-contain" />
       </div>
-      <span class="eyebrow pointer-events-none absolute top-3 left-3 rounded-[4px] px-2 py-1 text-ink" style="background: var(--bg-overlay);">Original</span>
-      <span class="eyebrow pointer-events-none absolute top-3 right-3 rounded-[4px] px-2 py-1 text-ink" style="background: var(--bg-overlay);">{VARIANT_LABEL[variant]}</span>
+      <span class="eyebrow pointer-events-none absolute top-3 left-3 rounded-[4px] px-2 py-1 text-ink" style="background: var(--bg-overlay);">Scan</span>
+      <span class="eyebrow pointer-events-none absolute top-3 right-3 rounded-[4px] px-2 py-1 text-ink" style="background: var(--bg-overlay);">{variant === 'enhanced' ? 'Upscaled' : 'Restored'}</span>
       <div class="pointer-events-none absolute inset-y-0" style="left: {split}%; width: 2px; background: var(--color-brand); transform: translateX(-1px);">
         <span
           class="absolute top-1/2 left-1/2 grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-on-brand shadow-[var(--shadow-md)]"
@@ -291,12 +312,16 @@
       </div>
     {:else if url}
       <img
-        src={url}
+        src={peeking && beforeUrl ? beforeUrl : url}
         alt={image.title ?? image.filename}
         draggable="false"
         class="absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] object-contain select-none"
         style="transform: translate({tx}px, {ty}px) scale({scale}); transition: {panning ? 'none' : 'transform 120ms var(--ease-out)'};"
       />
+    {/if}
+
+    {#if peeking}
+      <span class="eyebrow pointer-events-none absolute top-3 left-3 rounded-[4px] px-2 py-1 text-ink" style="background: var(--bg-overlay);">Scan</span>
     {/if}
 
     {#if loadingImg}

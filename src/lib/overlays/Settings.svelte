@@ -74,6 +74,7 @@
     <code class="input flex min-w-0 flex-1 items-center truncate font-mono text-xs text-ink-dim" title={store.settings?.output_dir ?? ''}>
       {store.settings?.output_dir ?? 'Default (app data folder)'}
     </code>
+    <button class="btn-sm" onclick={() => store.openOutput()}>Open</button>
     <button class="btn-sm" onclick={() => store.pickOutput()}>Change…</button>
   </div>
 {/snippet}
@@ -91,7 +92,7 @@
     <h3 class="eyebrow mt-3">Folders</h3>
     <div class="divide-y divide-line">
       {@render row('Scans', 'Where your scanned photos live. Never modified.', sourceCtl)}
-      {@render row('Output', 'Organized and restored copies are written here.', outputCtl)}
+      {@render row('Archive', 'Filed and restored copies are written here, by folder and year.', outputCtl)}
     </div>
 
     <h3 class="eyebrow mt-5">Library</h3>
@@ -136,7 +137,7 @@
       {/each}
     </div>
     <p class="mt-2 text-[11px] leading-relaxed text-ink-faint">
-      Models run on this computer (ONNX Runtime, CPU) and download on first use.
+      Models run on this computer and download the first time a step needs them.
       {#if dir}Stored in <code class="font-mono select-text">{dir}</code>.{/if}
     </p>
 

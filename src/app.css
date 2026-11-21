@@ -1,6 +1,3 @@
-/* Newsreader (serif) — reserved for emotional moments (empty states, review
-   headline). Added webfont; falls back to Georgia offline. */
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap');
 @import 'tailwindcss';
 
 /* Warm, restoration-focused desktop palette, exposed as Tailwind v4 tokens.
@@ -42,7 +39,7 @@
 
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
     sans-serif;
-  --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-serif: 'Newsreader Variable', Georgia, 'Times New Roman', serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
 
@@ -56,7 +53,7 @@
   /* Status → semantic */
   --status-new: var(--color-ink-dim);
   --status-organized: var(--color-info);
-  --status-enhanced: var(--color-success);
+  --status-restored: var(--color-success);
   --status-processing: var(--color-warning);
   --status-failed: var(--color-danger);
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { store } from '../store.svelte'
-  import { PIPELINE_STEPS } from '../types'
+  import { stepLabel as stepName } from '../types'
   import Icon from '../ui/Icon.svelte'
   import Badge from '../ui/Badge.svelte'
   import Spinner from '../ui/Spinner.svelte'
@@ -11,7 +11,7 @@
   const t = $derived(store.activeTask)
   const done = $derived(t ? t.completed + t.failed : 0)
   const pct = $derived(t && t.total ? (done / t.total) * 100 : 0)
-  const stepLabel = $derived(PIPELINE_STEPS.find((s) => s.key === t?.currentStep)?.label ?? 'Starting')
+  const stepLabel = $derived(!t?.currentStep ? 'Starting' : t.currentStep === 'organize' ? 'Filing' : stepName(t.currentStep))
 
   let now = $state(Date.now())
   $effect(() => {
@@ -27,7 +27,7 @@
     return `~${Math.floor(secs / 60)}m ${secs % 60}s`
   })
 
-  const stepName = (k: string) => PIPELINE_STEPS.find((s) => s.key === k)?.label ?? k
+  const recipe = (steps: string[]) => steps.filter((s) => s !== 'organize').map(stepName).join(' → ') || 'Filed only'
 
   function when(ts: string) {
     const d = new Date(ts.replace(' ', 'T') + (ts.endsWith('Z') ? '' : 'Z'))
@@ -40,7 +40,7 @@
   {#if store.settings?.source_dir}
     <span class="tabular-nums">
       {#if store.hasFilters}
-        <b class="font-medium text-ink">{store.total}</b> of {store.libraryTotal} photos
+        <b class="font-medium text-ink">{store.total}</b> of {store.libraryTotal} photos · {store.placeLabel}
       {:else}
         <b class="font-medium text-ink">{store.libraryTotal}</b> photos
       {/if}
@@ -86,7 +86,7 @@
         <span class="text-xs font-semibold text-ink">Activity</span>
         {#if t}
           <button class="btn-danger" onclick={() => store.cancelActive()}>
-            <Icon name="stop" size={11} />Cancel run
+            <Icon name="stop" size={11} />Stop
           </button>
         {/if}
       </div>
@@ -100,9 +100,7 @@
                 <Badge status={task.status} />
                 <span class="text-[11px] text-ink-faint tabular-nums">{when(task.created_at)}</span>
               </div>
-              <p class="truncate text-xs text-ink-dim" title={task.steps.map(stepName).join(' → ')}>
-                {task.steps.map(stepName).join(' → ')}
-              </p>
+              <p class="truncate text-xs text-ink-dim" title={recipe(task.steps)}>{recipe(task.steps)}</p>
               <p class="text-[11px] text-ink-faint tabular-nums">
                 {task.completed_images}/{task.total_images} photos{#if task.failed_images}<span class="text-danger"> · {task.failed_images} failed</span>{/if}
               </p>

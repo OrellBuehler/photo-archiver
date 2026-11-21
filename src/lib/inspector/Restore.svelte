@@ -1,22 +1,25 @@
 <script lang="ts">
-  import { listModels } from '../api'
+  import { listImageIds, listModels } from '../api'
   import { store } from '../store.svelte'
-  import { PIPELINE_STEPS, PRESETS, stepModelKeys } from '../types'
+  import { PIPELINE_STEPS, PRESETS, plural, stepModelKeys } from '../types'
   import type { ModelDownload, ModelStatus } from '../types'
   import Icon from '../ui/Icon.svelte'
   import Spinner from '../ui/Spinner.svelte'
   import Progress from '../ui/Progress.svelte'
 
+  const KNOWN = new Set(PIPELINE_STEPS.map((s) => s.key))
+
   function loadSteps(): Set<string> {
     try {
       const raw = localStorage.getItem('photo-archiver:steps')
-      if (raw) return new Set(JSON.parse(raw))
+      if (raw) return new Set((JSON.parse(raw) as string[]).filter((k) => KNOWN.has(k)))
     } catch {}
-    return new Set(['organize', 'crop', 'deskew', 'restore_color', 'remove_dust'])
+    return new Set(PRESETS[2].steps)
   }
 
   let steps = $state<Set<string>>(loadSteps())
-  let scope = $state<'selection' | 'all'>('selection')
+  let scope = $state<'selection' | 'view'>('selection')
+  let force = $state(false)
 
   $effect(() => {
     try {
@@ -25,8 +28,9 @@
   })
 
   const targetCount = $derived(store.targetIds.length)
-  const useAll = $derived(scope === 'all' || targetCount === 0)
-  const count = $derived(useAll ? store.libraryTotal : targetCount)
+  const useView = $derived(scope === 'view' || targetCount === 0)
+  const count = $derived(useView ? store.total : targetCount)
+  const place = $derived(store.placeLabel + (store.filters.search ? ` matching “${store.filters.search}”` : ''))
 
   function toggle(key: string) {
     const next = new Set(steps)
@@ -42,6 +46,7 @@
   const t = $derived(store.activeTask)
   const done = $derived(t ? t.completed + t.failed : 0)
   const ordered = $derived(PIPELINE_STEPS.filter((s) => steps.has(s.key)).map((s) => s.key))
+  const verb = $derived(steps.size ? 'Restore' : 'File')
 
   function stepState(key: string): 'idle' | 'running' | 'done' {
     if (!t?.currentStep) return 'idle'
@@ -52,50 +57,51 @@
   }
 
   // Runs that need a not-yet-downloaded model ask first.
-  let pending = $state<{ all: boolean } | null>(null)
+  let pending = $state<number[] | null>(null)
   let missing = $state<ModelStatus[]>([])
   const requiredModels = $derived(PIPELINE_STEPS.filter((s) => steps.has(s.key)).flatMap(stepModelKeys))
 
   async function run() {
-    const all = useAll
-    if (all) {
-      const ok = await store.confirm({
-        title: `Restore all ${store.libraryTotal} photos?`,
-        message: `${ordered.length} step${ordered.length === 1 ? '' : 's'} will run on every photo in the library. Originals are never modified.`,
-        confirmLabel: 'Start',
-      })
-      if (!ok) return
-    }
-    if (requiredModels.length) {
-      try {
+    let ids = store.targetIds
+    try {
+      if (useView) {
+        ids = await listImageIds(store.filters)
+        if (ids.length > 1) {
+          const ok = await store.confirm({
+            title: `${verb} all ${ids.length} photos in ${place}?`,
+            message: force
+              ? 'Every photo starts over from its scan — earlier steps and rotations are discarded.'
+              : 'Steps a photo already has are skipped, so this only does what is missing. The scans themselves are never modified.',
+            confirmLabel: 'Start',
+          })
+          if (!ok) return
+        }
+      }
+      if (requiredModels.length) {
         const statuses = await listModels()
         const m = statuses.filter((s) => requiredModels.includes(s.key) && !s.downloaded)
         if (m.length) {
           missing = m
-          pending = { all }
+          pending = ids
           return
         }
-      } catch (e) {
-        store.fail(e)
       }
+    } catch (e) {
+      return store.fail(e)
     }
-    await store.startBatch([...steps], all)
+    await start(ids)
+  }
+
+  async function start(ids: number[]) {
+    pending = null
+    const f = force
+    force = false
+    await store.restore(ids, ordered, f)
   }
 
   async function downloadAndRun() {
     if (!pending) return
-    const ok = await store.downloadModelFiles(missing.map((m) => m.key))
-    if (!ok) return
-    const { all } = pending
-    pending = null
-    await store.startBatch([...steps], all)
-  }
-
-  async function runAnyway() {
-    if (!pending) return
-    const { all } = pending
-    pending = null
-    await store.startBatch([...steps], all)
+    if (await store.downloadModelFiles(missing.map((m) => m.key))) await start(pending)
   }
 
   function pctOf(p: ModelDownload) {
@@ -109,31 +115,32 @@
       <section class="border-b border-line bg-brand-soft/30 px-3 py-3">
         <div class="flex items-center gap-2">
           <Spinner size={13} />
-          <span class="text-[13px] font-medium text-ink">Restoring…</span>
+          <span class="text-[13px] font-medium text-ink">Working…</span>
           <span class="ml-auto text-xs text-ink-dim tabular-nums">{done} / {t.total}</span>
         </div>
         <div class="mt-2.5"><Progress value={t.total ? (done / t.total) * 100 : null} height={6} /></div>
         {#if t.failed}<p class="mt-1.5 text-[11px] text-danger">{t.failed} failed so far</p>{/if}
         <button class="btn-danger mt-2.5 w-full" onclick={() => store.cancelActive()}>
-          <Icon name="stop" size={11} />Cancel
+          <Icon name="stop" size={11} />Stop after this photo
         </button>
       </section>
     {/if}
 
     <section class="px-3 pt-4">
-      <h3 class="eyebrow mb-2">Apply to</h3>
+      <h3 class="eyebrow mb-2">Which photos</h3>
       <div class="seg w-full">
         <button
-          class="flex-1 justify-center"
-          aria-pressed={!useAll}
+          class="min-w-0 flex-1 justify-center"
+          aria-pressed={!useView}
           disabled={targetCount === 0}
           class:opacity-40={targetCount === 0}
           onclick={() => (scope = 'selection')}
         >
-          {targetCount > 0 ? `${targetCount} selected` : 'Selection'}
+          {targetCount > 1 ? `${targetCount} selected` : targetCount === 1 ? 'This photo' : 'Selection'}
         </button>
-        <button class="flex-1 justify-center" aria-pressed={useAll} onclick={() => (scope = 'all')}>
-          Whole library
+        <button class="min-w-0 flex-1 justify-center" aria-pressed={useView} onclick={() => (scope = 'view')} title="Everything in {place}">
+          <span class="truncate">All in {store.placeLabel}</span>
+          <span class="tabular-nums opacity-70">{store.total}</span>
         </button>
       </div>
     </section>
@@ -161,17 +168,29 @@
     <section class="px-3 pt-5 pb-4">
       <div class="mb-2 flex items-baseline justify-between">
         <h3 class="eyebrow">Steps</h3>
-        <span class="text-[11px] text-ink-faint">{steps.size} on</span>
+        <span class="text-[11px] text-ink-faint">{steps.size} of {PIPELINE_STEPS.length}</span>
       </div>
       <div class="flex flex-col overflow-hidden rounded-[8px] border border-line bg-base">
+        <div class="flex items-center gap-2.5 border-b border-line/70 px-2.5 py-1.5">
+          <span class="grid h-4 w-4 shrink-0 place-items-center rounded-[4px] bg-surface-2 text-ink-faint">
+            <Icon name="check" size={10} stroke={3.2} />
+          </span>
+          <Icon name="archive" size={15} class="text-ink-faint" />
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs text-ink-dim">Copy into the archive</span>
+            <span class="block truncate text-[11px] text-ink-faint">Always — by folder, year and month</span>
+          </span>
+        </div>
         {#each PIPELINE_STEPS as s (s.key)}
           {@const on = steps.has(s.key)}
           {@const st = stepState(s.key)}
           <button
             type="button"
+            role="checkbox"
+            aria-checked={on}
             onclick={() => toggle(s.key)}
             disabled={!!t}
-            class="flex items-center gap-2.5 border-b border-line/70 px-2.5 py-2 text-left transition-colors last:border-b-0 hover:bg-surface-2"
+            class="flex items-center gap-2.5 border-b border-line/70 px-2.5 py-1.5 text-left transition-colors last:border-b-0 hover:bg-surface-2"
           >
             <span
               class="grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border-[1.5px] transition-colors {on
@@ -198,6 +217,14 @@
           </button>
         {/each}
       </div>
+
+      <label class="mt-3 flex cursor-pointer items-start gap-2.5 px-0.5">
+        <input type="checkbox" bind:checked={force} disabled={!!t} class="mt-0.5 accent-[var(--color-brand)]" />
+        <span>
+          <span class="block text-xs text-ink-dim">Start over from the scan</span>
+          <span class="block text-[11px] leading-snug text-ink-faint">Otherwise steps a photo already has are skipped.</span>
+        </span>
+      </label>
     </section>
   </div>
 
@@ -206,9 +233,7 @@
       <div class="flex items-start gap-2">
         <Icon name="download" size={15} class="mt-0.5 text-brand" />
         <div>
-          <p class="text-xs font-medium text-ink">
-            {missing.length} AI model{missing.length > 1 ? 's' : ''} to download
-          </p>
+          <p class="text-xs font-medium text-ink">{plural(missing.length, 'AI model')} to download first</p>
           <p class="mt-0.5 text-[11px] leading-snug text-ink-dim">One-time download; they run on this computer afterwards.</p>
         </div>
       </div>
@@ -236,21 +261,18 @@
       </div>
       <div class="mt-2.5 flex gap-1.5">
         <button class="btn flex-1" disabled={store.downloadingModels} onclick={downloadAndRun}>
-          {#if store.downloadingModels}<Spinner size={12} color="var(--color-on-brand)" />Downloading…{:else}Download & run{/if}
+          {#if store.downloadingModels}<Spinner size={12} color="var(--color-on-brand)" />Downloading…{:else}Download and start{/if}
         </button>
-        <button class="btn-sm h-8" disabled={store.downloadingModels} onclick={runAnyway}>Skip</button>
-        <button class="icon-btn h-8 w-8" aria-label="Cancel" disabled={store.downloadingModels} onclick={() => (pending = null)}>
-          <Icon name="x" size={14} />
-        </button>
+        <button class="btn-sm h-8" disabled={store.downloadingModels} onclick={() => (pending = null)}>Cancel</button>
       </div>
     </section>
   {:else}
     <div class="border-t border-line p-3">
-      <button class="btn w-full" disabled={store.busy || steps.size === 0 || count === 0 || store.downloadingModels} onclick={run}>
-        <Icon name="sparkles" size={15} />
-        {#if store.busy}Running…{:else}Restore {count} photo{count === 1 ? '' : 's'}{/if}
+      <button class="btn w-full" disabled={store.busy || count === 0 || store.downloadingModels} onclick={run}>
+        <Icon name={steps.size ? 'sparkles' : 'archive'} size={15} />
+        {#if store.busy}Working…{:else}{verb} {plural(count, 'photo')}{/if}
       </button>
-      <p class="mt-1.5 text-center text-[11px] text-ink-faint">Originals are never modified.</p>
+      <p class="mt-1.5 text-center text-[11px] text-ink-faint">Your scans are never modified.</p>
     </div>
   {/if}
 </div>

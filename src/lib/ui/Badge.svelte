@@ -1,10 +1,10 @@
 <script lang="ts" module>
-  // The scannable status language: new / organized / enhanced / processing /
+  // The scannable status language: new / organized / restored / processing /
   // running / completed / failed / cancelled.
   const STATUS_MAP: Record<string, { fg: string; bg: string }> = {
     new: { fg: 'var(--color-ink-dim)', bg: 'var(--color-surface-2)' },
     organized: { fg: 'var(--color-info)', bg: 'var(--color-info-soft)' },
-    enhanced: { fg: 'var(--color-success)', bg: 'var(--color-success-soft)' },
+    restored: { fg: 'var(--color-success)', bg: 'var(--color-success-soft)' },
     processing: { fg: 'var(--color-warning)', bg: 'var(--color-warning-soft)' },
     running: { fg: 'var(--color-warning)', bg: 'var(--color-warning-soft)' },
     completed: { fg: 'var(--color-success)', bg: 'var(--color-success-soft)' },

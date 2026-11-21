@@ -3,14 +3,13 @@ import type {
   AppSettings,
   DuplicateGroup,
   FilterCounts,
-  HistoryItem,
   Image,
   ImageFilters,
   ImageListResponse,
+  ImageTimeline,
   ModelEvent,
   ModelStatus,
   ProgressEvent,
-  SnapshotState,
   Task,
 } from './types'
 
@@ -30,24 +29,15 @@ export const listImages = (filters: ImageFilters, page: number, perPage: number)
 export const imageStats = (filters: ImageFilters) =>
   invoke<FilterCounts>('image_stats', { filters })
 
-export const getImage = (id: number) => invoke<Image | null>('get_image', { id })
+export const listImageIds = (filters: ImageFilters) => invoke<number[]>('list_image_ids', { filters })
 
-export function startBatch(
-  imageIds: number[],
-  all: boolean,
-  steps: string[],
-  onEvent: Channel<ProgressEvent>,
-) {
-  return invoke<Task>('start_batch', { imageIds, all, steps, onEvent })
+export function startBatch(imageIds: number[], steps: string[], force: boolean, onEvent: Channel<ProgressEvent>) {
+  return invoke<Task>('start_batch', { imageIds, steps, force, onEvent })
 }
 
 export const cancelTask = (taskId: number) => invoke<boolean>('cancel_task', { taskId })
 export const listTasks = () => invoke<Task[]>('list_tasks')
-export const getTask = (id: number) => invoke<Task | null>('get_task', { id })
-export const imageHistory = (id: number) => invoke<HistoryItem[]>('image_history', { id })
-
-export const rotateImage = (id: number, clockwise: boolean) =>
-  invoke<Image>('rotate_image', { id, clockwise })
+export const imageTimeline = (id: number) => invoke<ImageTimeline>('image_timeline', { id })
 
 export const bulkRotate = (ids: number[], clockwise: boolean) =>
   invoke<number>('bulk_rotate', { ids, clockwise })
@@ -57,8 +47,7 @@ export const setFolder = (ids: number[], folder: string | null) =>
 
 export const undoImage = (id: number) => invoke<Image>('undo_image', { id })
 export const redoImage = (id: number) => invoke<Image>('redo_image', { id })
-export const snapshotState = (id: number) =>
-  invoke<SnapshotState>('snapshot_state', { id })
+export const resetImages = (ids: number[]) => invoke<number>('reset_images', { ids })
 
 export const updateImage = (
   id: number,
@@ -92,6 +81,8 @@ export const listModels = () => invoke<ModelStatus[]>('list_models')
 export const modelsDir = () => invoke<string>('models_dir')
 export const logDir = () => invoke<string>('log_dir')
 export const openLogDir = () => invoke<void>('open_log_dir')
+export const openOutputDir = () => invoke<void>('open_output_dir')
+export const revealImage = (id: number) => invoke<void>('reveal_image', { id })
 export function downloadModels(keys: string[] | null, onEvent: Channel<ModelEvent>) {
   return invoke<void>('download_models', { keys, onEvent })
 }

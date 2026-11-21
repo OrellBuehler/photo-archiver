@@ -16,6 +16,7 @@ export interface Image {
   phash: string | null
   folder: string | null
   history_pos: number
+  error: string | null
   created_at: string
   updated_at: string
 }
@@ -30,9 +31,16 @@ export interface ImageFilters {
   year_unknown: boolean
 }
 
-export interface SnapshotState {
+export interface TimelineStep {
+  seq: number
+  label: string
+  created_at: string
+}
+
+/// A photo's undo stack; steps with `seq > pos` are currently undone.
+export interface ImageTimeline {
   pos: number
-  max: number
+  steps: TimelineStep[]
 }
 
 export interface ImageListResponse {
@@ -75,15 +83,9 @@ export interface Task {
   completed_at: string | null
 }
 
-export interface HistoryItem {
-  id: number
-  image_id: number
-  step: string
-  created_at: string
-}
-
 export interface DuplicateGroup {
-  image_ids: number[]
+  /// Best quality first.
+  images: Image[]
   distance: number
 }
 
@@ -129,18 +131,37 @@ export interface PipelineStep {
   modelKeys?: string[]
 }
 
+// Every photo is copied into the archive first ("organize", always on);
+// these are the optional clean-up steps on that copy, in run order.
 export const PIPELINE_STEPS: PipelineStep[] = [
-  { key: 'organize', label: 'Organize', hint: 'Copy into year/month folders', icon: 'folderTree' },
-  { key: 'orient', label: 'Auto-rotate', hint: 'Apply EXIF orientation', icon: 'rotateSquare' },
+  { key: 'orient', label: 'Auto-rotate', hint: 'Apply the rotation the scanner recorded', icon: 'rotateSquare' },
   { key: 'crop', label: 'Crop borders', hint: 'Trim blank scan margins', icon: 'crop' },
-  { key: 'auto_orient', label: 'Smart orient', hint: 'ML upright detection', icon: 'image', model: true, modelKey: 'resnet50' },
-  { key: 'deskew', label: 'Deskew', hint: 'Straighten tilted scans', icon: 'scanLine' },
-  { key: 'restore_color', label: 'Restore color', hint: 'Fix fading & contrast', icon: 'palette' },
-  { key: 'remove_dust', label: 'Remove dust', hint: 'Inpaint specks & scratches', icon: 'sparkles' },
-  { key: 'remove_lines', label: 'Remove scan lines', hint: 'LaMa inpaint', icon: 'layers', model: true, modelKey: 'lama' },
-  { key: 'restore_faces', label: 'Restore faces', hint: 'Detect & restore faces (GFPGAN)', icon: 'user', model: true, modelKeys: ['scrfd', 'gfpgan'] },
-  { key: 'enhance', label: 'Enhance', hint: 'Real-ESRGAN upscale', icon: 'wand', model: true, modelKey: 'realesrgan' },
+  { key: 'auto_orient', label: 'Smart orient', hint: 'Detect which way is up', icon: 'image', model: true, modelKey: 'resnet50' },
+  { key: 'deskew', label: 'Straighten', hint: 'Level tilted scans', icon: 'scanLine' },
+  { key: 'restore_color', label: 'Restore colour', hint: 'Fix fading and contrast', icon: 'palette' },
+  { key: 'remove_dust', label: 'Remove dust', hint: 'Paint out specks and scratches', icon: 'sparkles' },
+  { key: 'remove_lines', label: 'Remove scan lines', hint: 'Repair scanner streaks', icon: 'layers', model: true, modelKey: 'lama' },
+  { key: 'restore_faces', label: 'Restore faces', hint: 'Sharpen blurry faces', icon: 'user', model: true, modelKeys: ['scrfd', 'gfpgan'] },
+  { key: 'enhance', label: 'Upscale 4×', hint: 'Slow — adds detail for printing', icon: 'wand', model: true, modelKey: 'realesrgan' },
 ]
+
+const STEP_LABELS: Record<string, string> = {
+  organize: 'Filed',
+  rotate_left: 'Rotated left',
+  rotate_right: 'Rotated right',
+}
+
+export function stepLabel(key: string): string {
+  return STEP_LABELS[key] ?? PIPELINE_STEPS.find((s) => s.key === key)?.label ?? key
+}
+
+// The status language: where a photo is on its way into the archive.
+export const STATUS: Record<string, { label: string; color: string; hint: string }> = {
+  new: { label: 'New', color: 'var(--status-new)', hint: 'Not in the archive yet' },
+  organized: { label: 'Filed', color: 'var(--status-organized)', hint: 'Copied into the archive as scanned' },
+  restored: { label: 'Restored', color: 'var(--status-restored)', hint: 'Cleaned up and in the archive' },
+  failed: { label: 'Failed', color: 'var(--status-failed)', hint: 'The last restore did not finish' },
+}
 
 /// The model keys a step needs downloaded before it can run.
 export function stepModelKeys(s: PipelineStep): string[] {
@@ -156,15 +177,10 @@ export interface Preset {
 
 // Curated bundles — a friendlier entry than the flat step checklist.
 export const PRESETS: Preset[] = [
-  { key: 'file', label: 'Just file it', steps: ['organize'], desc: 'Sort into folders, no edits' },
-  { key: 'tidy', label: 'Quick tidy', steps: ['organize', 'orient', 'crop', 'deskew'], desc: 'Straighten, crop, organize' },
-  {
-    key: 'restore',
-    label: 'Full restore',
-    steps: ['organize', 'crop', 'deskew', 'restore_color', 'remove_dust'],
-    desc: 'Recommended for faded photos',
-  },
-  { key: 'max', label: 'Everything', steps: PIPELINE_STEPS.map((s) => s.key), desc: 'All steps incl. ML upscale' },
+  { key: 'file', label: 'Just file', steps: [], desc: 'Copy into folders, untouched' },
+  { key: 'tidy', label: 'Tidy', steps: ['orient', 'crop', 'deskew'], desc: 'Crop and straighten' },
+  { key: 'restore', label: 'Restore', steps: ['crop', 'deskew', 'restore_color', 'remove_dust'], desc: 'Tidy, colour and dust' },
+  { key: 'max', label: 'Everything', steps: PIPELINE_STEPS.map((s) => s.key), desc: 'All steps incl. AI — slow' },
 ]
 
 export const MONTHS = [
@@ -182,3 +198,13 @@ export const MONTHS = [
   'November',
   'Dezember',
 ]
+
+/// "06.1978", "1978" or null when undated.
+export function dateLabel(img: { year: number | null; month: number | null }): string | null {
+  if (img.year == null) return null
+  return img.month ? `${String(img.month).padStart(2, '0')}.${img.year}` : String(img.year)
+}
+
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`
+}

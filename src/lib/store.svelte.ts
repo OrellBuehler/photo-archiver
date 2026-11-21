@@ -7,26 +7,36 @@ import {
   downloadModels,
   getSettings,
   imageStats,
+  listImageIds,
   listImages,
   listTasks,
+  openOutputDir,
   pickOutputFolder,
   pickSourceFolder,
+  redoImage,
+  resetImages,
+  revealImage,
   scanSource,
   setFolder,
   setSourceFolder,
   startBatch,
+  undoImage,
+  updateImage,
   updateSettings,
 } from './api'
-import { clearThumbCache } from './thumbs'
-import type {
-  AppSettings,
-  FilterCounts,
-  Image,
-  ImageFilters,
-  ModelDownload,
-  ModelEvent,
-  ProgressEvent,
-  Task,
+import { clearThumbCache, invalidateThumb } from './thumbs'
+import {
+  MONTHS,
+  STATUS,
+  plural,
+  type AppSettings,
+  type FilterCounts,
+  type Image,
+  type ImageFilters,
+  type ModelDownload,
+  type ModelEvent,
+  type ProgressEvent,
+  type Task,
 } from './types'
 
 const emptyCounts: FilterCounts = {
@@ -42,6 +52,17 @@ const PAGE = 120
 
 export type View = 'grid' | 'loupe' | 'duplicates'
 export type InspectorTab = 'info' | 'restore'
+export type MetaField = 'title' | 'year' | 'folder'
+
+/// One place in the sidebar: everything but the search text.
+export type Place = Omit<Partial<ImageFilters>, 'search'>
+
+export interface Meta {
+  title: string | null
+  year: number | null
+  month: number | null
+  folder: string | null
+}
 
 interface ActiveTask {
   id: number
@@ -66,6 +87,15 @@ export interface ConfirmRequest {
   confirmLabel: string
   danger: boolean
   resolve: (ok: boolean) => void
+}
+
+export interface MenuItem {
+  label: string
+  icon?: string
+  hint?: string
+  danger?: boolean
+  separator?: boolean
+  run: () => void
 }
 
 function loadPref<T>(key: string, fallback: T): T {
@@ -104,8 +134,14 @@ class AppStore {
   inspectorOpen = $state(loadPref('inspector', true))
   inspectorTab = $state<InspectorTab>('info')
   gridSize = $state(loadPref('gridSize', 150))
+  gridFit = $state(loadPref('gridFit', true))
   settingsOpen = $state(false)
   shortcutsOpen = $state(false)
+
+  /// The date/folder last typed in, for "same as last photo".
+  lastMeta = $state<Omit<Meta, 'title'> | null>(loadPref('lastMeta', null))
+  /// Which inspector field to focus once the next photo's form mounts.
+  refocus = $state<MetaField | null>(null)
 
   tasks = $state<Task[]>([])
   activeTask = $state<ActiveTask | null>(null)
@@ -117,6 +153,7 @@ class AppStore {
 
   toasts = $state<Toast[]>([])
   confirmRequest = $state<ConfirmRequest | null>(null)
+  menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null)
   private toastSeq = 0
 
   get hasMore() {
@@ -131,14 +168,32 @@ class AppStore {
     return this.counts.statuses.reduce((n, s) => n + s.count, 0)
   }
 
+  get undated() {
+    return this.counts.years.find((y) => y.value === 'unknown')?.count ?? 0
+  }
+
   get focused(): Image | null {
     if (this.focusedId == null) return null
     return this.images.find((i) => i.id === this.focusedId) ?? null
   }
 
-  get hasFilters() {
+  get hasPlace() {
     const f = this.filters
-    return f.year != null || f.month != null || f.status != null || f.folder != null || f.year_unknown || !!f.search
+    return f.year != null || f.month != null || f.status != null || f.folder != null || f.year_unknown
+  }
+
+  get hasFilters() {
+    return this.hasPlace || !!this.filters.search
+  }
+
+  /// What the main view is showing, in words.
+  get placeLabel() {
+    const f = this.filters
+    if (f.status) return f.status === 'new' ? 'Inbox' : (STATUS[f.status]?.label ?? f.status)
+    if (f.folder) return f.folder
+    if (f.year_unknown) return 'Needs a date'
+    if (f.year != null) return f.month != null ? `${MONTHS[f.month]} ${f.year}` : String(f.year)
+    return 'All photos'
   }
 
   statusCount(value: string) {
@@ -174,9 +229,23 @@ class AppStore {
     savePref('gridSize', this.gridSize)
   }
 
+  toggleGridFit() {
+    this.gridFit = !this.gridFit
+    savePref('gridFit', this.gridFit)
+  }
+
   openInspector(tab: InspectorTab) {
     this.inspectorTab = tab
     if (!this.inspectorOpen) this.toggleInspector()
+  }
+
+  /// Jump into the date field of the focused photo.
+  editDate() {
+    if (this.focusedId == null && this.images.length) this.click(this.images[0].id)
+    if (this.focusedId == null) return
+    if (this.selected.size > 1) this.click(this.focusedId)
+    this.openInspector('info')
+    this.refocus = 'year'
   }
 
   // ── Feedback ────────────────────────────────────────────────────────────────
@@ -211,7 +280,7 @@ class AppStore {
     })
   }
 
-  // ── Source folder ───────────────────────────────────────────────────────────
+  // ── Folders ─────────────────────────────────────────────────────────────────
 
   async pickFolder() {
     try {
@@ -253,7 +322,7 @@ class AppStore {
       const n = await scanSource()
       this.loadedPages = 1
       await this.refresh()
-      this.toast(n > 0 ? `Found ${n} new photo${n === 1 ? '' : 's'}` : 'No new photos found', n > 0 ? 'success' : 'info')
+      this.toast(n > 0 ? `Found ${plural(n, 'new photo')}` : 'No new photos — the library is up to date', n > 0 ? 'success' : 'info')
     } catch (e) {
       this.fail(e)
     } finally {
@@ -262,9 +331,37 @@ class AppStore {
   }
 
   async pickOutput() {
+    const filed = this.libraryTotal - this.statusCount('new')
+    if (filed > 0) {
+      const ok = await this.confirm({
+        title: 'Change the archive folder?',
+        message: `${plural(filed, 'photo')} already filed will not be moved. Move the contents of the current archive folder to the new one yourself, or those photos lose their copies.`,
+        confirmLabel: 'Choose folder',
+      })
+      if (!ok) return
+    }
     try {
       const next = await pickOutputFolder()
-      if (next) this.settings = next
+      if (next) {
+        this.settings = next
+        this.bustThumbs()
+      }
+    } catch (e) {
+      this.fail(e)
+    }
+  }
+
+  async openOutput() {
+    try {
+      await openOutputDir()
+    } catch (e) {
+      this.fail(e)
+    }
+  }
+
+  async reveal(id: number) {
+    try {
+      await revealImage(id)
     } catch (e) {
       this.fail(e)
     }
@@ -277,20 +374,37 @@ class AppStore {
 
   // ── Listing ─────────────────────────────────────────────────────────────────
 
-  async refresh() {
+  /// Reload the list. `keep` pins the photo being edited in place even if the
+  /// edit just moved it out of this view, so its form doesn't vanish mid-typing.
+  async refresh(keep?: Image) {
     this.loading = true
+    const prevIdx = this.images.findIndex((i) => i.id === this.focusedId)
     try {
-      const [list, counts] = await Promise.all([
+      const [list, counts, ids] = await Promise.all([
         listImages(this.filters, 1, this.loadedPages * PAGE),
         imageStats(this.filters),
+        this.selected.size > 1 ? listImageIds(this.filters) : null,
       ])
-      this.images = list.images
+      let images = list.images
+      const present = new Set(images.map((i) => i.id))
+      if (this.focusedId != null && !present.has(this.focusedId)) {
+        if (keep && keep.id === this.focusedId) {
+          images = [...images]
+          images.splice(Math.min(Math.max(prevIdx, 0), images.length), 0, keep)
+        } else if (this.view === 'loupe' && images.length) {
+          this.focusedId = images[Math.min(Math.max(prevIdx, 0), images.length - 1)].id
+          this.selected = new Set([this.focusedId])
+        } else {
+          this.focusedId = null
+          if (this.view === 'loupe') this.view = 'grid'
+        }
+      }
+      this.images = images
       this.total = list.total
       this.counts = counts
-      const present = new Set(list.images.map((i) => i.id))
-      if (this.focusedId != null && !present.has(this.focusedId)) this.focusedId = null
-      if ([...this.selected].some((id) => !present.has(id))) {
-        this.selected = new Set([...this.selected].filter((id) => present.has(id)))
+      const valid = ids ? new Set(ids) : new Set(images.map((i) => i.id))
+      if ([...this.selected].some((id) => !valid.has(id))) {
+        this.selected = new Set([...this.selected].filter((id) => valid.has(id)))
       }
     } catch (e) {
       this.fail(e)
@@ -315,25 +429,30 @@ class AppStore {
     }
   }
 
-  setFilter(patch: Partial<ImageFilters>) {
-    this.filters = { ...this.filters, ...patch }
+  private applyFilters(next: ImageFilters) {
+    this.filters = next
     this.loadedPages = 1
+    this.clearSelection()
     if (this.view === 'duplicates') this.view = 'grid'
-    this.refresh()
+  }
+
+  /// Go to one place in the library (the search text carries over).
+  show(place: Place = {}) {
+    this.applyFilters({ year_unknown: false, search: this.filters.search, ...place })
+    this.focusedId = null
+    this.view = 'grid'
+    return this.refresh()
   }
 
   private searchTimer: ReturnType<typeof setTimeout> | undefined
   setSearch(q: string) {
-    this.filters = { ...this.filters, search: q }
-    this.loadedPages = 1
-    if (this.view === 'duplicates') this.view = 'grid'
+    this.applyFilters({ ...this.filters, search: q })
     if (this.searchTimer) clearTimeout(this.searchTimer)
     this.searchTimer = setTimeout(() => this.refresh(), 220)
   }
 
   clearFilters() {
-    this.filters = { year_unknown: false }
-    this.loadedPages = 1
+    this.applyFilters({ year_unknown: false })
     this.refresh()
   }
 
@@ -367,8 +486,13 @@ class AppStore {
     else this.click(id)
   }
 
-  selectAll() {
-    this.selected = new Set(this.images.map((i) => i.id))
+  /// Everything in the current view, including pages not loaded yet.
+  async selectAll() {
+    try {
+      this.selected = new Set(this.hasMore ? await listImageIds(this.filters) : this.images.map((i) => i.id))
+    } catch (e) {
+      this.fail(e)
+    }
   }
 
   clearSelection() {
@@ -410,19 +534,67 @@ class AppStore {
     const ids = this.targetIds
     if (!ids.length) return
     const ok = await this.confirm({
-      title: `Delete ${ids.length} photo${ids.length === 1 ? '' : 's'}?`,
+      title: `Remove ${plural(ids.length, 'photo')}?`,
       message:
-        'They are removed from the library along with their organized and restored copies. The original scans on disk are not touched.',
-      confirmLabel: 'Delete',
+        'They leave the library and their copies in the archive are deleted. The original scans are not touched — a rescan brings them back.',
+      confirmLabel: 'Remove',
       danger: true,
     })
     if (!ok) return
     try {
       const n = await bulkDelete(ids)
       this.clearSelection()
-      if (this.view === 'loupe') this.view = 'grid'
       await this.refresh()
-      this.toast(`Deleted ${n} photo${n === 1 ? '' : 's'}`)
+      this.toast(`Removed ${plural(n, 'photo')}`)
+    } catch (e) {
+      this.fail(e)
+    }
+  }
+
+  /// Throw away the archive copies and every edit; the photos are new again.
+  async resetTargets() {
+    const ids = this.targetIds
+    if (!ids.length) return
+    const ok = await this.confirm({
+      title: `Start over with ${plural(ids.length, 'photo')}?`,
+      message: 'Their copies in the archive and all restoration steps are discarded. They go back to the inbox as untouched scans.',
+      confirmLabel: 'Start over',
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      await resetImages(ids)
+      this.bustThumbs()
+      await this.refresh()
+    } catch (e) {
+      this.fail(e)
+    }
+  }
+
+  private remember(m: Omit<Meta, 'title'>) {
+    if (m.year == null && !m.folder) return
+    this.lastMeta = { year: m.year, month: m.month, folder: m.folder }
+    savePref('lastMeta', this.lastMeta)
+  }
+
+  /// Save one photo's details. With `advance`, move on to the next photo and
+  /// keep typing in the same field — the fast way through a stack of scans.
+  async saveMeta(image: Image, m: Meta, advance: MetaField | null = null) {
+    const idx = this.images.findIndex((i) => i.id === image.id)
+    const nextId = (this.images[idx + 1] ?? this.images[idx - 1])?.id
+    try {
+      if (m.title !== image.title || m.year !== image.year || m.month !== image.month) {
+        await updateImage(image.id, m.year, m.month, m.title)
+      }
+      if (m.folder !== image.folder) await setFolder([image.id], m.folder)
+      this.remember(m)
+      if (advance && nextId != null && this.focusedId === image.id) {
+        this.click(nextId)
+        this.refocus = advance
+        await this.refresh()
+      } else {
+        await this.refresh({ ...image, ...m })
+      }
     } catch (e) {
       this.fail(e)
     }
@@ -433,8 +605,27 @@ class AppStore {
     if (!ids.length) return
     try {
       await bulkUpdate(ids, year, month, title)
+      if (year != null) this.remember({ year, month, folder: null })
       await this.refresh()
-      this.toast(`Updated ${ids.length} photo${ids.length === 1 ? '' : 's'}`, 'success')
+      this.toast(`Updated ${plural(ids.length, 'photo')}`, 'success')
+    } catch (e) {
+      this.fail(e)
+    }
+  }
+
+  /// Give the targets the same date (and folder) as the last photo edited.
+  async applyLast(advance = false) {
+    const last = this.lastMeta
+    const ids = this.targetIds
+    if (!last || !ids.length) return
+    const idx = this.images.findIndex((i) => i.id === this.focusedId)
+    const nextId = ids.length === 1 ? (this.images[idx + 1] ?? this.images[idx - 1])?.id : undefined
+    try {
+      if (last.year != null) await bulkUpdate(ids, last.year, last.month, null)
+      if (last.folder) await setFolder(ids, last.folder)
+      if (advance && nextId != null) this.click(nextId)
+      await this.refresh()
+      if (ids.length > 1) this.toast(`Dated ${plural(ids.length, 'photo')}`, 'success')
     } catch (e) {
       this.fail(e)
     }
@@ -444,9 +635,10 @@ class AppStore {
     const ids = this.targetIds
     if (!ids.length) return
     try {
-      await bulkRotate(ids, clockwise)
+      const n = await bulkRotate(ids, clockwise)
       this.bustThumbs()
       await this.refresh()
+      if (n < ids.length) this.toast(`${plural(ids.length - n, 'photo')} could not be rotated`, 'error')
     } catch (e) {
       this.fail(e)
     }
@@ -457,8 +649,20 @@ class AppStore {
     if (!ids.length) return
     try {
       await setFolder(ids, folder)
+      if (folder) this.remember({ year: this.lastMeta?.year ?? null, month: this.lastMeta?.month ?? null, folder })
       await this.refresh()
       this.toast(folder ? `Moved to “${folder}”` : 'Removed from folder', 'success')
+    } catch (e) {
+      this.fail(e)
+    }
+  }
+
+  async undoRedo(id: number, redo: boolean) {
+    try {
+      await (redo ? redoImage(id) : undoImage(id))
+      invalidateThumb(id)
+      this.thumbVersion++
+      await this.refresh()
     } catch (e) {
       this.fail(e)
     }
@@ -507,19 +711,18 @@ class AppStore {
     }
   }
 
-  async startBatch(steps: string[], all: boolean) {
-    if (this.busy || steps.length === 0) return
-    const imageIds = all ? [] : this.targetIds
-    if (!all && imageIds.length === 0) return
-
+  /// Run the clean-up `steps` on `ids`. Photos are always filed first; steps a
+  /// photo already has are skipped unless `force` starts it over.
+  async restore(ids: number[], steps: string[], force = false) {
+    if (this.busy || ids.length === 0) return
     const channel = new Channel<ProgressEvent>()
     channel.onmessage = (e) => this.onProgress(e)
     try {
-      await startBatch(imageIds, all, steps, channel)
+      await startBatch(ids, ['organize', ...steps], force, channel)
       const t = this.activeTask
       if (t) {
-        const done = `Restored ${t.completed} photo${t.completed === 1 ? '' : 's'}`
-        if (t.status === 'cancelled') this.toast(`Cancelled · ${t.completed} of ${t.total} done`)
+        const done = `${plural(t.completed, 'photo')} done`
+        if (t.status === 'cancelled') this.toast(`Stopped · ${t.completed} of ${t.total} done`)
         else if (t.failed) this.toast(`${done} · ${t.failed} failed`, 'error')
         else this.toast(done, 'success')
       }

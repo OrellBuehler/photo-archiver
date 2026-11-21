@@ -13,6 +13,7 @@
   import Settings from './lib/overlays/Settings.svelte'
   import Shortcuts from './lib/overlays/Shortcuts.svelte'
   import Confirm from './lib/overlays/Confirm.svelte'
+  import ContextMenu from './lib/overlays/ContextMenu.svelte'
   import Toasts from './lib/overlays/Toasts.svelte'
   import Icon from './lib/ui/Icon.svelte'
   import Spinner from './lib/ui/Spinner.svelte'
@@ -40,9 +41,16 @@
     return () => unlistenDrop?.()
   })
 
+  // A mouse click must not leave a button focused, or the next Enter/Space
+  // shortcut would press it again instead of acting on the photo.
+  function releaseFocus(e: MouseEvent) {
+    const el = document.activeElement
+    if (e.detail > 0 && el instanceof HTMLButtonElement) el.blur()
+  }
+
   // App-wide shortcuts. View-specific keys (arrows, zoom…) live in the views.
   function onKey(e: KeyboardEvent) {
-    if (e.defaultPrevented || store.confirmRequest) return
+    if (e.defaultPrevented || store.confirmRequest || store.menu) return
     const t = e.target as HTMLElement
     const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
     const mod = e.ctrlKey || e.metaKey
@@ -76,9 +84,12 @@
       store.selectAll()
     } else if (e.key === 'Escape' && store.view === 'grid') {
       if (store.selected.size) store.clearSelection()
-      else if (store.hasFilters) store.clearFilters()
+      else if (store.filters.search) store.setSearch('')
     } else if (e.key === 'Escape' && store.view === 'duplicates') {
       store.view = 'grid'
+    } else if (mod && k === 'z' && store.view === 'grid' && store.focusedId != null && store.selected.size <= 1) {
+      e.preventDefault()
+      store.undoRedo(store.focusedId, e.shiftKey)
     } else if (store.view === 'duplicates' || mod || e.altKey) {
       return
     } else if (e.key === '[') {
@@ -92,11 +103,16 @@
       store.openInspector('restore')
     } else if (k === 'i') {
       store.openInspector('info')
+    } else if (k === 'd') {
+      e.preventDefault()
+      store.editDate()
+    } else if (e.key === '.') {
+      store.applyLast(store.selected.size <= 1)
     }
   }
 </script>
 
-<svelte:window onkeydown={onKey} />
+<svelte:window onkeydown={onKey} onclick={releaseFocus} />
 
 <Titlebar />
 
@@ -125,6 +141,7 @@
 {#if store.settingsOpen}<Settings />{/if}
 {#if store.shortcutsOpen}<Shortcuts />{/if}
 <Confirm />
+<ContextMenu />
 <Toasts />
 
 {#if dropActive}

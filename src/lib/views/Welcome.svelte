@@ -4,9 +4,9 @@
   import Spinner from '../ui/Spinner.svelte'
 
   const STEPS = [
-    { icon: 'folderOpen', title: 'Point at your scans', text: 'Any folder or mounted drive. Originals are never modified.' },
-    { icon: 'wand', title: 'Restore', text: 'Crop, straighten, revive faded colour, remove dust and scan lines.' },
-    { icon: 'folderTree', title: 'File away', text: 'Date your photos and copy them into tidy year / month folders.' },
+    { title: 'Point at your scans', text: 'Any folder or mounted drive. The scans themselves are never changed.' },
+    { title: 'Date and restore', text: 'Crop, straighten, revive faded colour, clear dust and scan lines.' },
+    { title: 'Get a tidy archive', text: 'Clean copies land in year and event folders, ready for your photo library.' },
   ]
 </script>
 
@@ -25,9 +25,18 @@
       <span class="grid h-14 w-14 place-items-center rounded-[12px] bg-brand-soft text-brand transition-transform group-hover:scale-105">
         {#if store.scanning}<Spinner size={24} />{:else}<Icon name="folderOpen" size={28} stroke={1.6} />{/if}
       </span>
-      <span class="text-[15px] font-medium text-ink">{store.scanning ? 'Scanning folder…' : 'Choose a folder of scans'}</span>
+      <span class="text-[15px] font-medium text-ink">{store.scanning ? 'Looking for photos…' : 'Choose your folder of scans'}</span>
       <span class="text-xs text-ink-faint">or drop a folder anywhere on this window</span>
     </button>
+
+    <div class="mt-3 flex w-full items-center gap-3 rounded-[10px] border border-line bg-surface px-4 py-3 text-left">
+      <Icon name="archive" size={18} class="text-ink-faint" />
+      <div class="min-w-0 flex-1">
+        <p class="text-xs text-ink-dim">Restored copies are saved to</p>
+        <p class="truncate font-mono text-[11px] text-ink select-text" title={store.settings?.output_dir ?? ''}>{store.settings?.output_dir ?? '—'}</p>
+      </div>
+      <button class="btn-sm" onclick={() => store.pickOutput()}>Change…</button>
+    </div>
 
     <div class="mt-10 grid w-full grid-cols-3 gap-4 text-left">
       {#each STEPS as s, i (s.title)}

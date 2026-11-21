@@ -9,6 +9,7 @@
         [['←', '→', '↑', '↓'], 'Move between photos'],
         [['Enter'], 'Open large view'],
         [['Esc'], 'Back to grid / clear selection'],
+        [['Right-click'], 'Everything you can do with a photo'],
         [['/'], 'Search'],
         [['Ctrl', 'scroll'], 'Thumbnail size'],
       ],
@@ -18,7 +19,15 @@
       items: [
         [['Space'], 'Toggle photo'],
         [['Shift', '←→↑↓'], 'Extend selection'],
-        [['Ctrl', 'A'], 'Select all loaded'],
+        [['Ctrl', 'A'], 'Select everything in view'],
+      ],
+    },
+    {
+      title: 'Date',
+      items: [
+        [['D'], 'Type the date'],
+        [['Enter'], 'Save and go to the next photo'],
+        [['.'], 'Same date as the last photo'],
       ],
     },
     {
@@ -26,7 +35,7 @@
       items: [
         [['['], 'Rotate left'],
         [[']'], 'Rotate right'],
-        [['Del'], 'Delete'],
+        [['Del'], 'Remove from library'],
         [['R'], 'Restore panel'],
         [['I'], 'Info panel'],
       ],
@@ -34,9 +43,10 @@
     {
       title: 'Large view',
       items: [
-        [['C'], 'Compare with original'],
+        [['O'], 'Hold to see the untouched scan'],
+        [['C'], 'Slide between scan and result'],
         [['+', '−', '0'], 'Zoom in / out / fit'],
-        [['Ctrl', 'Z'], 'Undo last change'],
+        [['Ctrl', 'Z'], 'Undo last step'],
         [['Ctrl', 'Shift', 'Z'], 'Redo'],
       ],
     },
