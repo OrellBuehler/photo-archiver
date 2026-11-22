@@ -1,4 +1,5 @@
 import { mount } from 'svelte'
+import '@fontsource-variable/newsreader'
 import './app.css'
 import App from './App.svelte'
 

@@ -129,18 +129,21 @@ fn collect_files(source_dir: &Path) -> Vec<ScannedFile> {
     out
 }
 
-/// Walk the source directory, extract metadata, and upsert all JPEGs.
-/// Returns the number of files seen.
+/// Walk the source directory, extract metadata, and upsert every image.
+/// Returns the number of photos that were not in the library before.
 pub async fn scan_source(pool: &SqlitePool, source_dir: PathBuf) -> Result<usize> {
     let files = tauri::async_runtime::spawn_blocking(move || collect_files(&source_dir)).await?;
 
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM images")
+        .fetch_one(pool)
+        .await?;
     let mut tx = pool.begin().await?;
     for f in &files {
         sqlx::query(
             r#"
             INSERT INTO images
-              (source_path, filename, scan_id, file_size, width, height, year, month, title)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (source_path, filename, scan_id, file_size, width, height, year, month, title, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
             ON CONFLICT(source_path) DO UPDATE SET
               filename = excluded.filename,
               file_size = excluded.file_size,
@@ -163,5 +166,8 @@ pub async fn scan_source(pool: &SqlitePool, source_dir: PathBuf) -> Result<usize
     }
     tx.commit().await?;
 
-    Ok(files.len())
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM images")
+        .fetch_one(pool)
+        .await?;
+    Ok((after - before).max(0) as usize)
 }

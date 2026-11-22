@@ -12,6 +12,7 @@ mod snapshots;
 mod state;
 mod thumbnails;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
@@ -93,6 +94,7 @@ pub fn run() {
                 running: AtomicBool::new(false),
                 cancel: AtomicBool::new(false),
                 current_task: Mutex::new(None),
+                busy: Mutex::new(HashSet::new()),
             });
 
             Ok(())
@@ -105,14 +107,12 @@ pub fn run() {
             commands::scan_source,
             commands::list_images,
             commands::image_stats,
-            commands::get_image,
+            commands::list_image_ids,
             commands::get_thumbnail,
             commands::start_batch,
             commands::cancel_task,
             commands::list_tasks,
-            commands::get_task,
-            commands::image_history,
-            commands::rotate_image,
+            commands::image_timeline,
             commands::bulk_rotate,
             commands::update_image,
             commands::bulk_update,
@@ -120,7 +120,7 @@ pub fn run() {
             commands::set_folder,
             commands::undo_image,
             commands::redo_image,
-            commands::snapshot_state,
+            commands::reset_images,
             commands::get_variant,
             commands::scan_duplicates,
             commands::find_duplicates,
@@ -130,6 +130,8 @@ pub fn run() {
             commands::models_dir,
             commands::log_dir,
             commands::open_log_dir,
+            commands::open_output_dir,
+            commands::reveal_image,
             commands::download_models,
         ])
         .run(tauri::generate_context!())

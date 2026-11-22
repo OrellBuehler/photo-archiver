@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -19,6 +20,8 @@ pub struct AppState {
     pub running: AtomicBool,
     pub cancel: AtomicBool,
     pub current_task: Mutex<Option<i64>>,
+    /// Images the running task still has to touch — off limits to manual edits.
+    pub busy: Mutex<HashSet<i64>>,
 }
 
 impl AppState {
@@ -78,7 +81,20 @@ impl AppState {
         true
     }
 
+    pub fn set_busy(&self, ids: &[i64]) {
+        *self.busy.lock().unwrap() = ids.iter().copied().collect();
+    }
+
+    pub fn release(&self, id: i64) {
+        self.busy.lock().unwrap().remove(&id);
+    }
+
+    pub fn is_busy(&self, id: i64) -> bool {
+        self.busy.lock().unwrap().contains(&id)
+    }
+
     pub fn finish(&self) {
+        self.busy.lock().unwrap().clear();
         self.running.store(false, Ordering::SeqCst);
         self.cancel.store(false, Ordering::SeqCst);
         *self.current_task.lock().unwrap() = None;
